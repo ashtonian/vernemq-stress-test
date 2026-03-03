@@ -1,0 +1,55 @@
+# Secrets & credentials
+*.pem
+*.key
+*.p12
+*.pfx
+*.credentials
+*.secret
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+.env
+*.env
+!*.env.example
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/*.tfvars
+terraform/*.auto.tfvars
+terraform/crash.log
+terraform/override.tf
+terraform/override.tf.json
+terraform/*_override.tf
+terraform/*_override.tf.json
+
+# Ansible
+ansible/*.retry
+ansible/vault_pass*
+ansible/*.vault
+ansible/*.vault.yml
+
+# Results (keep the directory via .gitkeep)
+results/*
+!results/.gitkeep
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+
+# Logs
+*.log

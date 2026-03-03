@@ -1,0 +1,10 @@
+---
+# Prometheus settings
+prometheus_version: "2.48.1"
+prometheus_install_dir: "/opt/prometheus"
+prometheus_data_dir: "/var/lib/prometheus"
+prometheus_scrape_interval: "15s"
+
+# Grafana settings
+grafana_version: "10.2.3"
+grafana_admin_password: "vernemq-bench"

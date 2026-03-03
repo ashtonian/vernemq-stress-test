@@ -1,0 +1,49 @@
+---
+# Stop VerneMQ and clean data directories (use between benchmark runs).
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts teardown_cluster.yml
+#
+- name: Teardown VerneMQ cluster
+  hosts: vmq_nodes
+  become: true
+  vars:
+    vernemq_install_dir: "/opt/vernemq"
+    vernemq_data_dir: "/var/lib/vernemq"
+    vernemq_log_dir: "/var/log/vernemq"
+  tasks:
+    - name: Stop VerneMQ service
+      ansible.builtin.service:
+        name: vernemq
+        state: stopped
+      ignore_errors: true
+
+    - name: Clean VerneMQ data directory
+      ansible.builtin.file:
+        path: "{{ vernemq_data_dir }}"
+        state: absent
+
+    - name: Recreate VerneMQ data directory
+      ansible.builtin.file:
+        path: "{{ vernemq_data_dir }}"
+        state: directory
+        owner: vernemq
+        group: vernemq
+        mode: "0755"
+
+    - name: Clean VerneMQ log directory
+      ansible.builtin.file:
+        path: "{{ vernemq_log_dir }}"
+        state: absent
+
+    - name: Recreate VerneMQ log directory
+      ansible.builtin.file:
+        path: "{{ vernemq_log_dir }}"
+        state: directory
+        owner: vernemq
+        group: vernemq
+        mode: "0755"
+
+    - name: Display teardown complete
+      ansible.builtin.debug:
+        msg: "VerneMQ stopped and data cleaned on {{ inventory_hostname }}"

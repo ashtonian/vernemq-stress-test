@@ -1,0 +1,122 @@
+services:
+  vmq1:
+    build:
+      context: ../..
+      dockerfile: bench/local/Dockerfile
+    image: vmq-local-bench
+    hostname: vmq1.local
+    container_name: vmq1
+    ports:
+      - "1883:1883"
+      - "8888:8888"
+    environment:
+      VMQ_NODENAME: "VerneMQ@vmq1.local"
+      VMQ_COOKIE: "vmqlocalbench"
+    volumes:
+      - vmq1_data:/opt/vernemq/data
+      - vmq1_log:/opt/vernemq/log
+    networks:
+      vmq_cluster:
+        aliases:
+          - vmq1.local
+    healthcheck:
+      test: ["CMD", "/opt/vernemq/bin/vernemq", "ping"]
+      interval: 5s
+      retries: 12
+      start_period: 30s
+      timeout: 5s
+
+  vmq2:
+    build:
+      context: ../..
+      dockerfile: bench/local/Dockerfile
+    image: vmq-local-bench
+    hostname: vmq2.local
+    container_name: vmq2
+    ports:
+      - "1884:1883"
+      - "8889:8888"
+    environment:
+      VMQ_NODENAME: "VerneMQ@vmq2.local"
+      VMQ_DISCOVERY_NODE: "VerneMQ@vmq1.local"
+      VMQ_COOKIE: "vmqlocalbench"
+    volumes:
+      - vmq2_data:/opt/vernemq/data
+      - vmq2_log:/opt/vernemq/log
+    networks:
+      vmq_cluster:
+        aliases:
+          - vmq2.local
+    depends_on:
+      vmq1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/opt/vernemq/bin/vernemq", "ping"]
+      interval: 5s
+      retries: 12
+      start_period: 30s
+      timeout: 5s
+
+  vmq3:
+    build:
+      context: ../..
+      dockerfile: bench/local/Dockerfile
+    image: vmq-local-bench
+    hostname: vmq3.local
+    container_name: vmq3
+    ports:
+      - "1885:1883"
+      - "8890:8888"
+    environment:
+      VMQ_NODENAME: "VerneMQ@vmq3.local"
+      VMQ_DISCOVERY_NODE: "VerneMQ@vmq1.local"
+      VMQ_COOKIE: "vmqlocalbench"
+    volumes:
+      - vmq3_data:/opt/vernemq/data
+      - vmq3_log:/opt/vernemq/log
+    networks:
+      vmq_cluster:
+        aliases:
+          - vmq3.local
+    depends_on:
+      vmq1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/opt/vernemq/bin/vernemq", "ping"]
+      interval: 5s
+      retries: 12
+      start_period: 30s
+      timeout: 5s
+
+  bench:
+    build:
+      context: .
+      dockerfile: Dockerfile.bench
+    image: emqtt-bench-local
+    hostname: bench
+    container_name: bench
+    volumes:
+      - ./results:/results
+      - ./scenarios:/scenarios:ro
+    networks:
+      - vmq_cluster
+    depends_on:
+      vmq1:
+        condition: service_healthy
+      vmq2:
+        condition: service_healthy
+      vmq3:
+        condition: service_healthy
+    command: ["tail", "-f", "/dev/null"]
+
+volumes:
+  vmq1_data:
+  vmq1_log:
+  vmq2_data:
+  vmq2_log:
+  vmq3_data:
+  vmq3_log:
+
+networks:
+  vmq_cluster:
+    driver: bridge

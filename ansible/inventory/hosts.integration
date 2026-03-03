@@ -1,0 +1,24 @@
+[vmq_nodes]
+10.0.2.127 ansible_host=10.0.2.127 ansible_user=ec2-user node_index=1 nodename=VerneMQ@10.0.2.127
+10.0.2.166 ansible_host=10.0.2.166 ansible_user=ec2-user node_index=2 nodename=VerneMQ@10.0.2.166
+10.0.2.216 ansible_host=10.0.2.216 ansible_user=ec2-user node_index=3 nodename=VerneMQ@10.0.2.216
+10.0.2.175 ansible_host=10.0.2.175 ansible_user=ec2-user node_index=4 nodename=VerneMQ@10.0.2.175
+10.0.2.225 ansible_host=10.0.2.225 ansible_user=ec2-user node_index=5 nodename=VerneMQ@10.0.2.225
+
+[bench_nodes]
+10.0.2.233 ansible_host=10.0.2.233 ansible_user=ec2-user node_index=1
+10.0.2.167 ansible_host=10.0.2.167 ansible_user=ec2-user node_index=2
+10.0.2.196 ansible_host=10.0.2.196 ansible_user=ec2-user node_index=3
+
+[monitor]
+13.222.26.84 ansible_host=13.222.26.84 ansible_user=ec2-user
+
+[private:children]
+vmq_nodes
+bench_nodes
+
+[private:vars]
+ansible_ssh_common_args=-o StrictHostKeyChecking=no -o ProxyJump=ec2-user@13.222.26.84
+
+[monitor:vars]
+ansible_ssh_common_args=-o StrictHostKeyChecking=no

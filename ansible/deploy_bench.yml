@@ -1,0 +1,11 @@
+---
+# Deploy benchmark tools on bench client nodes.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts deploy_bench.yml
+#
+- name: Deploy benchmark tools
+  hosts: bench_nodes
+  become: true
+  roles:
+    - bench

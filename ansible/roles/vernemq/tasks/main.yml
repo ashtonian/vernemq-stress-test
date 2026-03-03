@@ -1,0 +1,430 @@
+---
+- name: Auto-detect version family
+  ansible.builtin.set_fact:
+    vernemq_version_family: >-
+      {% if build_mode == 'source' %}integration{% elif vernemq_version is match('^1\.') %}1.x{% else %}2.x{% endif %}
+  when: vernemq_version_family == 'auto'
+
+- name: Set vmq-admin command for source builds
+  ansible.builtin.set_fact:
+    vmq_admin_cmd: "{{ vernemq_install_dir }}/bin/vmq-admin"
+  when: build_mode == 'source'
+
+- name: Install required packages
+  ansible.builtin.dnf:
+    name:
+      - openssl
+      - openssl-devel
+      - ncurses-devel
+      - gcc
+      - gcc-c++
+      - make
+      - git
+      - tar
+      - cmake
+      - snappy-devel
+    state: present
+  become: true
+
+# --------------------------------------------------------------------------
+# Create vernemq user/group (needed for source builds; RPM creates it)
+# --------------------------------------------------------------------------
+
+- name: Create vernemq group
+  ansible.builtin.group:
+    name: vernemq
+    state: present
+  become: true
+
+- name: Create vernemq user
+  ansible.builtin.user:
+    name: vernemq
+    group: vernemq
+    system: true
+    shell: /sbin/nologin
+    create_home: false
+  become: true
+
+# --------------------------------------------------------------------------
+# Release mode: download prebuilt package from GitHub
+# --------------------------------------------------------------------------
+
+- name: Download VerneMQ release RPM
+  ansible.builtin.get_url:
+    url: "{{ vernemq_release_url }}"
+    dest: "/tmp/vernemq-{{ vernemq_version }}.rpm"
+    mode: "0644"
+  when: build_mode == "release"
+
+- name: Install VerneMQ RPM
+  ansible.builtin.dnf:
+    name: "/tmp/vernemq-{{ vernemq_version }}.rpm"
+    state: present
+    disable_gpg_check: true
+  become: true
+  when: build_mode == "release"
+
+# --------------------------------------------------------------------------
+# Source mode: upload local repo, build on node 1, distribute tarball
+# --------------------------------------------------------------------------
+
+- name: Install Erlang/OTP 27.2 from source (build node only)
+  when: build_mode == "source"
+  run_once: true
+  delegate_to: "{{ groups['vmq_nodes'][0] }}"
+  block:
+    - name: Install Erlang build dependencies
+      ansible.builtin.dnf:
+        name:
+          - autoconf
+          - openssl-devel
+          - ncurses-devel
+          - gcc
+          - gcc-c++
+          - make
+          - perl
+          - unixODBC-devel
+          - libxslt
+        state: present
+      become: true
+
+    - name: Check if Erlang 27 is already installed
+      ansible.builtin.command:
+        cmd: erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
+      changed_when: false
+      failed_when: false
+      register: existing_erlang
+
+    - name: Download Erlang/OTP 27.2 source
+      ansible.builtin.get_url:
+        url: "https://github.com/erlang/otp/releases/download/OTP-27.2/otp_src_27.2.tar.gz"
+        dest: /tmp/otp_src_27.2.tar.gz
+        mode: "0644"
+      when: existing_erlang.rc != 0 or '"27"' not in existing_erlang.stdout
+
+    - name: Extract Erlang source
+      ansible.builtin.unarchive:
+        src: /tmp/otp_src_27.2.tar.gz
+        dest: /tmp/
+        remote_src: true
+      when: existing_erlang.rc != 0 or '"27"' not in existing_erlang.stdout
+
+    - name: Build and install Erlang/OTP 27.2
+      ansible.builtin.shell:
+        cmd: |
+          cd /tmp/otp_src_27.2
+          ./configure --without-javac --without-wx --without-debugger --without-observer --without-et --without-megaco
+          make -j$(nproc)
+          make install
+      become: true
+      changed_when: true
+      when: existing_erlang.rc != 0 or '"27"' not in existing_erlang.stdout
+      timeout: 1200
+
+    - name: Verify Erlang version
+      ansible.builtin.command:
+        cmd: erl -eval 'erlang:display(erlang:system_info(otp_release)), halt().' -noshell
+      changed_when: false
+      register: erlang_version
+
+    - name: Display Erlang version
+      ansible.builtin.debug:
+        msg: "Erlang OTP version: {{ erlang_version.stdout }}"
+
+- name: Capture git version locally
+  ansible.builtin.command:
+    cmd: git describe --tags --always
+    chdir: "{{ vernemq_local_src_dir }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: build_mode == "source"
+  changed_when: false
+  register: local_git_version
+
+- name: Create source archive locally (without .git to reduce size)
+  ansible.builtin.shell:
+    cmd: >-
+      tar czf /tmp/vernemq-integration-src.tar.gz
+      --exclude='{{ vernemq_local_src_dir | basename }}/_build'
+      --exclude='{{ vernemq_local_src_dir | basename }}/.git'
+      --exclude='{{ vernemq_local_src_dir | basename }}/.claude'
+      --exclude='{{ vernemq_local_src_dir | basename }}/bench/results'
+      --exclude='{{ vernemq_local_src_dir | basename }}/erl_crash.dump'
+      -C "{{ vernemq_local_src_dir | dirname }}"
+      "{{ vernemq_local_src_dir | basename }}"
+  delegate_to: localhost
+  become: false
+  run_once: true
+  when: build_mode == "source"
+  changed_when: true
+
+- name: Upload source archive to build node
+  ansible.builtin.copy:
+    src: /tmp/vernemq-integration-src.tar.gz
+    dest: /tmp/vernemq-integration-src.tar.gz
+    mode: "0644"
+  become: true
+  when: build_mode == "source"
+  run_once: true
+  delegate_to: "{{ groups['vmq_nodes'][0] }}"
+
+- name: Clean previous source directory
+  ansible.builtin.file:
+    path: "{{ vernemq_src_dir }}"
+    state: absent
+  become: true
+  when: build_mode == "source"
+  run_once: true
+  delegate_to: "{{ groups['vmq_nodes'][0] }}"
+
+- name: Extract source archive
+  ansible.builtin.unarchive:
+    src: /tmp/vernemq-integration-src.tar.gz
+    dest: /opt/
+    remote_src: true
+  become: true
+  when: build_mode == "source"
+  run_once: true
+  delegate_to: "{{ groups['vmq_nodes'][0] }}"
+
+- name: Rename extracted directory to vernemq source dir
+  ansible.builtin.command:
+    cmd: mv /opt/{{ vernemq_local_src_dir | basename }} {{ vernemq_src_dir }}
+    creates: "{{ vernemq_src_dir }}"
+  become: true
+  when: build_mode == "source"
+  run_once: true
+  delegate_to: "{{ groups['vmq_nodes'][0] }}"
+
+- name: Initialize git repo for version detection
+  ansible.builtin.shell:
+    cmd: |
+      git config --global --add safe.directory {{ vernemq_src_dir }}
+      git init
+      git add -A
+      git commit -m "bench build"
+      git tag -a "{{ local_git_version.stdout | default('integration') }}" -m "bench"
+    chdir: "{{ vernemq_src_dir }}"
+  become: true
+  when: build_mode == "source"
+  run_once: true
+  delegate_to: "{{ groups['vmq_nodes'][0] }}"
+  changed_when: true
+  environment:
+    HOME: /root
+    GIT_AUTHOR_NAME: bench
+    GIT_AUTHOR_EMAIL: bench@localhost
+    GIT_COMMITTER_NAME: bench
+    GIT_COMMITTER_EMAIL: bench@localhost
+
+- name: Build VerneMQ from source (rebar3 as prod release)
+  ansible.builtin.shell:
+    cmd: make rel 2>&1 || true
+    chdir: "{{ vernemq_src_dir }}"
+  become: true
+  when: build_mode == "source"
+  run_once: true
+  delegate_to: "{{ groups['vmq_nodes'][0] }}"
+  changed_when: true
+  register: build_result
+  environment:
+    HOME: /root
+  timeout: 1800
+
+- name: Display build result (last 20 lines)
+  ansible.builtin.debug:
+    msg: "{{ (build_result.stdout_lines | default([]))[-20:] }}"
+  when: build_mode == "source"
+  run_once: true
+
+- name: Verify release was assembled
+  ansible.builtin.stat:
+    path: "{{ vernemq_src_dir }}/_build/default/rel/vernemq/bin/vernemq"
+  become: true
+  when: build_mode == "source"
+  run_once: true
+  delegate_to: "{{ groups['vmq_nodes'][0] }}"
+  register: release_check
+  failed_when: not release_check.stat.exists
+
+- name: Create VerneMQ tarball from build
+  ansible.builtin.command:
+    cmd: >-
+      tar czf /tmp/vernemq-source.tar.gz
+      -C {{ vernemq_src_dir }}/_build/default/rel vernemq
+  become: true
+  when: build_mode == "source"
+  run_once: true
+  delegate_to: "{{ groups['vmq_nodes'][0] }}"
+  changed_when: true
+
+- name: Fetch VerneMQ tarball to controller
+  ansible.builtin.fetch:
+    src: /tmp/vernemq-source.tar.gz
+    dest: /tmp/vernemq-source.tar.gz
+    flat: true
+  when: build_mode == "source"
+  run_once: true
+  delegate_to: "{{ groups['vmq_nodes'][0] }}"
+
+- name: Distribute VerneMQ tarball to all nodes
+  ansible.builtin.copy:
+    src: /tmp/vernemq-source.tar.gz
+    dest: /tmp/vernemq-source.tar.gz
+    mode: "0644"
+  become: true
+  when: build_mode == "source"
+
+- name: Create VerneMQ install directory
+  ansible.builtin.file:
+    path: "{{ vernemq_install_dir }}"
+    state: directory
+    mode: "0755"
+    owner: vernemq
+    group: vernemq
+  become: true
+  when: build_mode == "source"
+
+- name: Extract VerneMQ tarball
+  ansible.builtin.unarchive:
+    src: /tmp/vernemq-source.tar.gz
+    dest: "{{ vernemq_install_dir }}"
+    remote_src: true
+    extra_opts: ["--strip-components=1"]
+    owner: vernemq
+    group: vernemq
+  become: true
+  when: build_mode == "source"
+
+# --------------------------------------------------------------------------
+# Create systemd unit for source builds
+# --------------------------------------------------------------------------
+
+- name: Create VerneMQ systemd unit (source mode)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/vernemq.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=VerneMQ MQTT Broker
+      After=network.target
+
+      [Service]
+      Type=forking
+      User=vernemq
+      Group=vernemq
+      Environment=WAIT_FOR_ERLANG=60
+      ExecStart={{ vernemq_install_dir }}/bin/vernemq start
+      ExecStop={{ vernemq_install_dir }}/bin/vernemq stop
+      LimitNOFILE=1048576
+      LimitNPROC=65535
+      Restart=on-failure
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+  become: true
+  when: build_mode == "source"
+  notify: restart vernemq
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  when: build_mode == "source"
+
+# --------------------------------------------------------------------------
+# Configuration (both modes)
+# --------------------------------------------------------------------------
+
+- name: Create VerneMQ data directory
+  ansible.builtin.file:
+    path: "{{ vernemq_data_dir }}"
+    state: directory
+    owner: vernemq
+    group: vernemq
+    mode: "0755"
+  become: true
+
+- name: Create VerneMQ log directory
+  ansible.builtin.file:
+    path: "{{ vernemq_log_dir }}"
+    state: directory
+    owner: vernemq
+    group: vernemq
+    mode: "0755"
+  become: true
+
+- name: Determine config directory
+  ansible.builtin.set_fact:
+    vernemq_actual_conf_dir: >-
+      {{ vernemq_install_dir + '/etc' if build_mode == 'source' else vernemq_conf_dir }}
+
+- name: Ensure config directory exists
+  ansible.builtin.file:
+    path: "{{ vernemq_actual_conf_dir | trim }}"
+    state: directory
+    owner: vernemq
+    group: vernemq
+    mode: "0755"
+  become: true
+
+- name: Deploy VerneMQ configuration
+  ansible.builtin.template:
+    src: vernemq.conf.j2
+    dest: "{{ vernemq_actual_conf_dir | trim }}/vernemq.conf"
+    owner: vernemq
+    group: vernemq
+    mode: "0644"
+  become: true
+  notify: restart vernemq
+
+# --------------------------------------------------------------------------
+# Node exporter (for Prometheus metrics)
+# --------------------------------------------------------------------------
+
+- name: Download node_exporter
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-amd64.tar.gz"
+    dest: "/tmp/node_exporter-{{ node_exporter_version }}.tar.gz"
+    mode: "0644"
+  when: install_node_exporter
+
+- name: Extract node_exporter
+  ansible.builtin.unarchive:
+    src: "/tmp/node_exporter-{{ node_exporter_version }}.tar.gz"
+    dest: /usr/local/bin
+    remote_src: true
+    extra_opts: ["--strip-components=1", "--wildcards", "*/node_exporter"]
+  become: true
+  when: install_node_exporter
+
+- name: Create node_exporter systemd unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/node_exporter.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Prometheus Node Exporter
+      After=network.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/local/bin/node_exporter
+      Restart=always
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+  become: true
+  when: install_node_exporter
+
+- name: Enable and start node_exporter
+  ansible.builtin.systemd:
+    name: node_exporter
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true
+  when: install_node_exporter

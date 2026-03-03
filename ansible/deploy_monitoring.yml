@@ -1,0 +1,11 @@
+---
+# Deploy Prometheus and Grafana on the monitoring node.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts deploy_monitoring.yml
+#
+- name: Deploy monitoring stack
+  hosts: monitor
+  become: true
+  roles:
+    - monitoring

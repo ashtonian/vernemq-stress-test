@@ -1,0 +1,13 @@
+metadata:
+  name: high_throughput
+  description: "Maximum throughput configuration"
+
+tunables:
+  reg_trie_workers: 16
+  outgoing_clustering_connection_count: 8
+  max_inflight_messages: 500
+  coordinate_registrations: "off"
+  mqtt_listener_nr_of_acceptors: 200
+  mqtt_listener_max_connections: 1000000
+  erlang_async_threads: 128
+  erlang_max_ports: 2097152

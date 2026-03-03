@@ -1,0 +1,87 @@
+---
+# Build mode: "release" downloads from GitHub, "source" builds from git
+build_mode: release
+
+# Release mode settings
+vernemq_version: "2.1.1"
+vernemq_release_url: "https://github.com/vernemq/vernemq/releases/download/{{ vernemq_version }}/vernemq-{{ vernemq_version }}.al2023.x86_64.rpm"
+
+# Source mode settings
+vernemq_repo: "https://github.com/vernemq/vernemq.git"
+vernemq_branch: "main"
+vernemq_src_dir: "/opt/vernemq-src"
+vernemq_local_src_dir: "{{ playbook_dir }}/../../.."
+
+# Installation paths
+vernemq_install_dir: "/opt/vernemq"
+vernemq_data_dir: "/var/lib/vernemq"
+vernemq_log_dir: "/var/log/vernemq"
+vernemq_conf_dir: "/etc/vernemq"
+
+# Erlang VM settings
+erlang_async_threads: 64
+erlang_max_ports: 1048576
+
+# MQTT listener
+mqtt_listener_port: 1883
+mqtt_listener_max_connections: 500000
+mqtt_listener_nr_of_acceptors: 100
+
+# Clustering
+clustering_listener_port: 44053
+
+# Balance / load distribution
+balance_enabled: "off"
+balance_reject_enabled: "off"
+balance_threshold: "1.2"
+
+# Rebalancing
+rebalance_enabled: "off"
+rebalance_threshold: "1.3"
+
+# Cluster health
+cluster_ready_quorum: "1.0"
+dead_node_cleanup_timeout: "0"
+
+# Connection pool
+connection_pool_size: 4
+
+# Registry trie workers
+reg_trie_workers: 8
+
+# Gossip settings
+gossip_interval: 10000
+
+# Version family: "auto" auto-detects, or specify "1.x", "2.x", "integration"
+vernemq_version_family: "auto"
+vmq_admin_cmd: "/usr/sbin/vmq-admin"  # RPM default; source builds override
+
+# All tunable defaults (matching profile keys)
+# These can be overridden via profile extra-vars
+outgoing_clustering_buffer_size: 10000
+outgoing_clustering_reconnect_base_delay: 1000
+outgoing_clustering_reconnect_max_delay: 30000
+balance_hysteresis: "0.1"
+balance_min_connections: 100
+balance_check_interval: 5000
+rebalance_batch_size: 50
+rebalance_cooldown: 30
+rebalance_on_node_join: "off"
+rebalance_stable_interval: 60
+rebalance_auto_interval: 0
+max_inflight_messages: 200
+max_online_messages: 10000
+max_offline_messages: 1000
+queue_deliver_mode: fanout
+queue_type: fifo
+max_message_rate: 0
+max_message_size: 0
+allow_register_during_netsplit: "off"
+allow_publish_during_netsplit: "off"
+allow_subscribe_during_netsplit: "off"
+coordinate_registrations: "on"
+shared_subscription_policy: prefer_local
+
+# Node exporter for Prometheus scraping
+install_node_exporter: true
+node_exporter_version: "1.7.0"

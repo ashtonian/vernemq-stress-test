@@ -1,0 +1,8 @@
+---
+# emqtt-bench settings
+emqtt_bench_repo: "https://github.com/emqx/emqtt-bench.git"
+emqtt_bench_branch: "master"
+emqtt_bench_install_dir: "/opt/emqtt-bench"
+
+# Erlang version for building emqtt-bench
+erlang_version: "26"

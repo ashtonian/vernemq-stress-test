@@ -1,0 +1,37 @@
+# Multi-stage emqtt-bench build from source
+# Prebuilt binaries are AL2023-only; we need Debian/arm64 support.
+
+# ---------------------------------------------------------------------------
+# Build stage
+# ---------------------------------------------------------------------------
+FROM erlang:27.2 AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git make gcc g++ cmake ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+RUN git clone --depth 1 --branch 0.6.2 https://github.com/emqx/emqtt-bench.git .
+# make builds the release (includes rebar3 bootstrap)
+RUN make || true
+# Verify the release exists
+RUN test -d _build/emqtt_bench/rel/emqtt_bench \
+    || (echo "ERROR: emqtt_bench release not found" && ls -la _build/ && exit 1)
+
+# ---------------------------------------------------------------------------
+# Runtime stage
+# ---------------------------------------------------------------------------
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssl libncurses6 procps \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/_build/emqtt_bench/rel/emqtt_bench /opt/emqtt_bench
+
+RUN ln -s /opt/emqtt_bench/bin/emqtt_bench /usr/local/bin/emqtt_bench
+
+# Verify it runs
+RUN emqtt_bench --help || true
+
+CMD ["tail", "-f", "/dev/null"]

@@ -1,0 +1,12 @@
+---
+# Deploy and configure VerneMQ on all cluster nodes.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts deploy_vernemq.yml
+#   ansible-playbook -i inventory/hosts deploy_vernemq.yml -e build_mode=source -e vernemq_branch=integration_test
+#
+- name: Deploy VerneMQ
+  hosts: vmq_nodes
+  become: true
+  roles:
+    - vernemq

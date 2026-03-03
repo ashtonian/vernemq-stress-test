@@ -1,0 +1,10 @@
+metadata:
+  name: netsplit_tolerant
+  description: "Quorum-based health with dead node cleanup"
+
+tunables:
+  cluster_ready_quorum: "0.6"
+  dead_node_cleanup_timeout: 120
+  allow_register_during_netsplit: "on"
+  allow_publish_during_netsplit: "on"
+  allow_subscribe_during_netsplit: "on"
