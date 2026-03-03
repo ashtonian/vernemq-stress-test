@@ -5,6 +5,7 @@
 ## Node identity
 ## ---------------------------------------------------------------------------
 nodename = {{ nodename | default('VerneMQ@' + ansible_default_ipv4.address) }}
+distributed_cookie = {{ distributed_cookie | default('vmqbenchsecret') }}
 
 ## ---------------------------------------------------------------------------
 ## Listeners
@@ -17,14 +18,38 @@ listener.vmq.clustering = {{ ansible_default_ipv4.address }}:{{ clustering_liste
 
 listener.http.default = {{ ansible_default_ipv4.address }}:8888
 
+## Global listener defaults
+listener.max_connections = {{ listener_max_connections }}
+listener.nr_of_acceptors = {{ listener_nr_of_acceptors }}
+
+## Protocol versions and proxy
+listener.tcp.allowed_protocol_versions = {{ listener_tcp_allowed_protocol_versions }}
+listener.tcp.proxy_protocol = {{ listener_tcp_proxy_protocol }}
+listener.ws.allowed_protocol_versions = {{ listener_ws_allowed_protocol_versions }}
+listener.ws.proxy_protocol = {{ listener_ws_proxy_protocol }}
+
+## TCP socket options
+tcp_listen_options = {{ tcp_listen_options }}
+
 ## ---------------------------------------------------------------------------
 ## Erlang VM tuning
 ## ---------------------------------------------------------------------------
 erlang.async_threads = {{ erlang_async_threads }}
 erlang.max_ports = {{ erlang_max_ports }}
-distributed_cookie = {{ distributed_cookie | default('vmqbenchsecret') }}
+erlang.process_limit = {{ erlang_max_processes }}
+erlang.distribution_buffer_size = {{ erlang_distribution_buffer_size }}
+erlang.schedulers.force_wakeup_interval = 500
+erlang.schedulers.compaction_of_load = false
 erlang.distribution.port_range.minimum = 6000
 erlang.distribution.port_range.maximum = 7999
+
+## ---------------------------------------------------------------------------
+## MQTT protocol (all versions)
+## ---------------------------------------------------------------------------
+mqtt_connect_timeout = {{ mqtt_connect_timeout }}
+disconnect_on_unauthorized_publish_v3 = {{ disconnect_on_unauthorized_publish_v3 }}
+persistent_client_expiration = {{ persistent_client_expiration }}
+upgrade_outgoing_qos = {{ upgrade_outgoing_qos }}
 
 ## ---------------------------------------------------------------------------
 ## Queue settings (all versions)
@@ -48,6 +73,14 @@ shared_subscription_policy = {{ shared_subscription_policy }}
 ## Registration coordination
 coordinate_registrations = {{ coordinate_registrations }}
 
+## ---------------------------------------------------------------------------
+## Netsplit behavior (all versions)
+## ---------------------------------------------------------------------------
+allow_register_during_netsplit = {{ allow_register_during_netsplit }}
+allow_publish_during_netsplit = {{ allow_publish_during_netsplit }}
+allow_subscribe_during_netsplit = {{ allow_subscribe_during_netsplit }}
+allow_unsubscribe_during_netsplit = {{ allow_unsubscribe_during_netsplit }}
+
 {% if vernemq_version_family != '1.x' %}
 ## ---------------------------------------------------------------------------
 ## Clustering buffer (2.x+)
@@ -57,6 +90,12 @@ outgoing_clustering_buffer_size = {{ outgoing_clustering_buffer_size }}
 
 {% if vernemq_version_family == 'integration' %}
 ## ---------------------------------------------------------------------------
+## Clustering reconnect (integration only)
+## ---------------------------------------------------------------------------
+outgoing_clustering_reconnect_base_delay = {{ outgoing_clustering_reconnect_base_delay }}
+outgoing_clustering_reconnect_max_delay = {{ outgoing_clustering_reconnect_max_delay }}
+
+## ---------------------------------------------------------------------------
 ## Registry trie workers (integration only)
 ## ---------------------------------------------------------------------------
 reg_trie_workers = {{ reg_trie_workers }}
@@ -65,6 +104,7 @@ reg_trie_workers = {{ reg_trie_workers }}
 ## Connection pooling (integration only)
 ## ---------------------------------------------------------------------------
 outgoing_clustering_connection_count = {{ connection_pool_size | default(outgoing_clustering_connection_count) }}
+
 ## ---------------------------------------------------------------------------
 ## Balance (integration only)
 ## ---------------------------------------------------------------------------
@@ -93,13 +133,6 @@ cluster_ready_quorum = {{ cluster_ready_quorum }}
 dead_node_cleanup_timeout = {{ dead_node_cleanup_timeout }}
 
 ## ---------------------------------------------------------------------------
-## Netsplit behavior (integration only)
-## ---------------------------------------------------------------------------
-allow_register_during_netsplit = {{ allow_register_during_netsplit }}
-allow_publish_during_netsplit = {{ allow_publish_during_netsplit }}
-allow_subscribe_during_netsplit = {{ allow_subscribe_during_netsplit }}
-
-## ---------------------------------------------------------------------------
 ## Gossip (integration only - vmq_swc setting)
 ## ---------------------------------------------------------------------------
 vmq_swc.gossip_interval = {{ gossip_interval }}
@@ -108,19 +141,26 @@ vmq_swc.gossip_interval = {{ gossip_interval }}
 ## ---------------------------------------------------------------------------
 ## Storage and paths
 ## ---------------------------------------------------------------------------
-metadata_plugin = vmq_plumtree
+metadata_plugin = vmq_swc
 leveldb.data_root = {{ vernemq_data_dir }}/leveldb
+leveldb.maximum_memory.percent = {{ leveldb_maximum_memory_percent }}
 log.console = file
 log.console.file = {{ vernemq_log_dir }}/console.log
 log.error.file = {{ vernemq_log_dir }}/error.log
 log.crash.file = {{ vernemq_log_dir }}/crash.log
 
 ## ---------------------------------------------------------------------------
-## Authentication / authorization (permissive for benchmarks)
+## Authentication / authorization
 ## ---------------------------------------------------------------------------
+{% if bench_auth_enabled and bench_mqtt_password | length > 0 %}
+allow_anonymous = off
+plugins.vmq_passwd = on
+plugins.vmq_acl = on
+{% else %}
 allow_anonymous = on
 plugins.vmq_passwd = off
 plugins.vmq_acl = off
+{% endif %}
 
 {% if vernemq_version_family != 'integration' %}
 ## ---------------------------------------------------------------------------
@@ -130,6 +170,6 @@ accept_eula = yes
 {% endif %}
 
 ## ---------------------------------------------------------------------------
-## Metrics
+## Plugins
 ## ---------------------------------------------------------------------------
 plugins.vmq_diversity = off

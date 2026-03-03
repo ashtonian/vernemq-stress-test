@@ -1,0 +1,35 @@
+# shared.tfvars.example — Copy to shared.tfvars and fill in values.
+# Pass to each module: terraform -chdir=terraform/<module> apply -var-file=../shared.tfvars
+#
+# Required
+key_pair_name = "YOUR_KEY_PAIR_NAME"
+
+# Optional
+# aws_region          = "us-east-1"
+# aws_profile         = "vernemq-bench"
+# instance_type_vmq   = "c6i.2xlarge"
+# instance_type_bench = "c6i.2xlarge"    # See bench sizing below
+# instance_type_monitor = "c6i.xlarge"
+# vmq_node_count      = 3
+# bench_node_count    = 1                # See bench sizing below
+# project_name        = "vernemq-bench"
+# allowed_ssh_cidr    = "0.0.0.0/0"
+
+# Bench node sizing — emqtt-bench uses one Erlang process per MQTT connection.
+# CPU is the bottleneck, not memory.  Approximate capacity per instance type:
+#
+#   c6i.2xlarge  (8 vCPU)  — ~120-150k active connections
+#   c6i.4xlarge  (16 vCPU) — ~250-300k active connections
+#   c6i.8xlarge  (32 vCPU) — ~500-600k active connections
+#
+# Rule of thumb: 1 bench node per 3-4 VMQ nodes at LOAD_MULTIPLIER=1.
+# With LOAD_MULTIPLIER=3, double that (1 bench per 1-2 VMQ nodes).
+#
+# Example: 10 VMQ nodes with LOAD_MULTIPLIER=3 → scenario 01 phase 3
+# generates ~562k connections.  Use bench_node_count = 3 with c6i.4xlarge,
+# or bench_node_count = 1 with c6i.8xlarge.
+
+# Load balancer
+# enable_lb          = false
+# enable_auth        = true
+# bench_username     = "benchuser"

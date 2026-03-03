@@ -1,3 +1,8 @@
+# high_throughput.yaml — Maximum throughput overlay
+# Overrides default.yaml values; see default.yaml for version-gating docs.
+# Note: reg_trie_workers and outgoing_clustering_connection_count are
+# integration-only — they will be silently skipped on v2.1.x/v1.x.
+
 metadata:
   name: high_throughput
   description: "Maximum throughput configuration"

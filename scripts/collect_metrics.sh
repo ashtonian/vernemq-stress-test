@@ -52,8 +52,9 @@ log() {
 prom_query() {
     local query="$1" output="$2"
     log "Querying: $query"
-    curl -sf --max-time 30 \
-        "${PROMETHEUS_URL}/api/v1/query?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$query'))")" \
+    curl -sf --max-time 30 -G \
+        "${PROMETHEUS_URL}/api/v1/query" \
+        --data-urlencode "query=${query}" \
         -o "$output" 2>/dev/null || {
         log "WARNING: Failed to query: $query"
         echo '{"status":"error","data":{"resultType":"","result":[]}}' > "$output"

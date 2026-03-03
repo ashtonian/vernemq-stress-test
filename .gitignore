@@ -12,9 +12,11 @@ id_ed25519.*
 .env
 *.env
 !*.env.example
+bench.env
 
-# Terraform
+# Terraform (legacy monolithic)
 terraform/.terraform/
+terraform/.terraform.lock.hcl
 terraform/*.tfstate
 terraform/*.tfstate.*
 terraform/*.tfplan
@@ -26,11 +28,27 @@ terraform/override.tf.json
 terraform/*_override.tf
 terraform/*_override.tf.json
 
+# Terraform (module split)
+terraform/*/.terraform/
+terraform/*/.terraform.lock.hcl
+terraform/*/terraform.tfstate*
+terraform/*/*.tfplan
+terraform/*/*.tfvars
+terraform/*/*.auto.tfvars
+terraform/*/crash.log
+terraform/state/*.tfstate
+terraform/state/*.tfstate.*
+!terraform/state/.gitkeep
+terraform/shared.tfvars
+!terraform/shared.tfvars.example
+
 # Ansible
 ansible/*.retry
 ansible/vault_pass*
 ansible/*.vault
 ansible/*.vault.yml
+ansible/inventory/hosts*
+!ansible/inventory/.gitkeep
 
 # Results (keep the directory via .gitkeep)
 results/*
@@ -50,6 +68,9 @@ __pycache__/
 *.pyo
 venv/
 .venv/
+
+# Tooling
+.claude/
 
 # Logs
 *.log

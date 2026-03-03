@@ -8,5 +8,6 @@
 - name: Deploy VerneMQ
   hosts: vmq_nodes
   become: true
+  serial: 1
   roles:
     - vernemq

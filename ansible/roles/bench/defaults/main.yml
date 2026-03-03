@@ -1,8 +1,5 @@
 ---
 # emqtt-bench settings
-emqtt_bench_repo: "https://github.com/emqx/emqtt-bench.git"
-emqtt_bench_branch: "master"
 emqtt_bench_install_dir: "/opt/emqtt-bench"
-
-# Erlang version for building emqtt-bench
-erlang_version: "26"
+emqtt_bench_version: "0.6.2"
+emqtt_bench_platform: "amzn2023-amd64"

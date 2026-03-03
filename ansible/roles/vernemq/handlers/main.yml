@@ -1,4 +1,6 @@
 ---
+# NOTE: Re-running deploy on a live cluster triggers simultaneous restarts
+# unless the playbook uses serial: 1 to roll through nodes one at a time.
 - name: restart vernemq
   ansible.builtin.service:
     name: vernemq
@@ -9,6 +11,6 @@
 
 - name: reload vernemq
   ansible.builtin.command:
-    cmd: "{{ vernemq_install_dir }}/bin/vmq-admin reload"
+    cmd: "{{ vmq_admin_cmd | default('/usr/sbin/vmq-admin') }} reload"
   become: true
   changed_when: true

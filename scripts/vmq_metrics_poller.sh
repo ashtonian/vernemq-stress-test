@@ -17,8 +17,8 @@ set -euo pipefail
 NODES=""
 INTERVAL="${METRICS_POLL_INTERVAL:-10}"
 OUTPUT=""
-SSH_OPTS="${SSH_OPTS:-"-o StrictHostKeyChecking=no -o ConnectTimeout=5"}"
-SSH_USER="${SSH_USER:-ubuntu}"
+SSH_OPTS="${SSH_OPTS:--o StrictHostKeyChecking=no -o ConnectTimeout=5}"
+SSH_USER="${SSH_USER:-ec2-user}"
 VMQ_ADMIN="${VMQ_ADMIN:-sudo vmq-admin}"
 
 # Focused metric set to collect
@@ -52,7 +52,7 @@ Options:
   --interval N          Poll interval in seconds (default: 10, env METRICS_POLL_INTERVAL)
   --output PATH         Output CSV file path (required)
   --ssh-opts "OPTS"     SSH options (default: "-o StrictHostKeyChecking=no -o ConnectTimeout=5")
-  --ssh-user USER       SSH user (default: ubuntu)
+  --ssh-user USER       SSH user (default: ec2-user)
   --vmq-admin CMD       vmq-admin command (default: "sudo vmq-admin")
   -h, --help            Show this help
 

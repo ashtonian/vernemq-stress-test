@@ -1,3 +1,7 @@
+# netsplit_tolerant.yaml — Quorum-based health overlay
+# Overrides default.yaml values; see default.yaml for version-gating docs.
+# All settings below are integration-only — silently skipped on v2.1.x/v1.x.
+
 metadata:
   name: netsplit_tolerant
   description: "Quorum-based health with dead node cleanup"

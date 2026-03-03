@@ -1,2 +1,5 @@
 results/
+monitoring/
+haproxy/
+.bench.lock
 *.log

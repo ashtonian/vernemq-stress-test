@@ -1,0 +1,76 @@
+---
+# restart_cluster.yml - Lightweight cluster reset between benchmark scenarios.
+#
+# Restarts VerneMQ services, reforms the cluster, and verifies health.
+# Faster than a full teardown+redeploy.
+#
+# Usage:
+#   ansible-playbook -i inventory/hosts restart_cluster.yml
+#
+- name: Restart VerneMQ services
+  hosts: vmq_nodes
+  become: true
+  tasks:
+    - name: Stop VerneMQ service
+      ansible.builtin.service:
+        name: vernemq
+        state: stopped
+      ignore_errors: true
+
+    - name: Wait for VerneMQ to fully stop
+      ansible.builtin.wait_for:
+        port: "{{ clustering_listener_port | default(44053) }}"
+        state: stopped
+        timeout: 30
+      ignore_errors: true
+
+    - name: Start VerneMQ service
+      ansible.builtin.service:
+        name: vernemq
+        state: started
+        enabled: true
+
+    - name: Wait for VerneMQ to be ready
+      ansible.builtin.command:
+        cmd: "{{ vmq_admin_cmd | default('/usr/sbin/vmq-admin') }} cluster show"
+      register: vmq_ready
+      until: vmq_ready.rc == 0
+      retries: 30
+      delay: 5
+      changed_when: false
+
+- name: Reform cluster
+  hosts: vmq_nodes[1:]
+  become: true
+  serial: 1
+  vars:
+    first_node_ip: "{{ hostvars[groups['vmq_nodes'][0]].ansible_host }}"
+  tasks:
+    - name: Check if already in cluster
+      ansible.builtin.command:
+        cmd: "{{ vmq_admin_cmd | default('/usr/sbin/vmq-admin') }} cluster show"
+      register: cluster_status
+      changed_when: false
+
+    - name: Join to first node
+      ansible.builtin.command:
+        cmd: "{{ vmq_admin_cmd | default('/usr/sbin/vmq-admin') }} cluster join discovery-node=VerneMQ@{{ first_node_ip }}"
+      when: first_node_ip not in cluster_status.stdout
+      changed_when: true
+
+- name: Verify cluster health
+  hosts: vmq_nodes[0]
+  become: true
+  tasks:
+    - name: Wait for all nodes in cluster
+      ansible.builtin.command:
+        cmd: "{{ vmq_admin_cmd | default('/usr/sbin/vmq-admin') }} cluster show"
+      register: cluster_final
+      until: cluster_final.stdout_lines | select('search', 'true') | list | length == (groups['vmq_nodes'] | length)
+      retries: 60
+      delay: 5
+      changed_when: false
+
+    - name: Display cluster status
+      ansible.builtin.debug:
+        msg: "{{ cluster_final.stdout_lines }}"

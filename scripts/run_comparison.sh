@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # run_comparison.sh - Run A/B benchmark comparison
 #
-# Deploys stock VerneMQ release, runs benchmarks, then deploys integration
-# branch from source, runs the same benchmarks, and saves both result sets.
+# Deploys baseline VerneMQ from a git repo+ref, runs benchmarks, then deploys
+# candidate from another repo+ref, runs the same benchmarks, and saves both
+# result sets.
 #
 # Usage:
-#   ./run_comparison.sh --baseline-version 2.1.2 --source /path/to/vernemq \
+#   ./run_comparison.sh --baseline-repo https://github.com/vernemq/vernemq.git --baseline-ref v2.1.2 \
+#       --candidate-repo https://github.com/user/vernemq.git --candidate-ref feature-branch \
 #       --scenarios standard --cluster-size 3 --load-multiplier 3
 
 set -euo pipefail
@@ -14,10 +16,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BENCH_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ANSIBLE_DIR="${BENCH_DIR}/ansible"
 
+source "${SCRIPT_DIR}/lib.sh"
+
 # Defaults
-BASELINE_VERSION=""
-SOURCE_PATH=""
+BASELINE_REPO=""
+BASELINE_REF=""
+CANDIDATE_REPO=""
+CANDIDATE_REF=""
 SCENARIOS="standard"
+CATEGORY="all"
 CLUSTER_SIZE=""
 LOAD_MULTIPLIER=3
 RESULTS_BASE="${BENCH_DIR}/results"
@@ -29,165 +36,105 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --baseline-version VER  Stock VerneMQ version for baseline (e.g. 2.1.2)
-  --source PATH           Path to integration branch source
-  --scenarios LIST        Scenario selection (default: standard)
-  --cluster-size N        Number of VMQ nodes (default: auto from inventory)
-  --load-multiplier N     Scale all loads by N (default: 3)
-  --duration SECS         Duration per phase (default: 180)
-  -h, --help              Show this help
+  --baseline-repo URL    Git repository URL for baseline (required)
+  --baseline-ref REF     Git ref for baseline: tag, branch, or commit (required)
+  --candidate-repo URL   Git repository URL for candidate (required)
+  --candidate-ref REF    Git ref for candidate: tag, branch, or commit (required)
+  --scenarios LIST       Scenario selection (default: standard)
+  --category CAT         Scenario category: core, integration, or all (default: all)
+  --cluster-size N       Number of VMQ nodes (default: auto from inventory)
+  --load-multiplier N    Scale all loads by N (default: 3)
+  --duration SECS        Duration per phase (default: 180)
+  --lb                   Route traffic through load balancer
+  -h, --help             Show this help
+
+Examples:
+  $(basename "$0") --baseline-repo https://github.com/vernemq/vernemq.git --baseline-ref v2.1.2 \\
+      --candidate-repo https://github.com/user/vernemq.git --candidate-ref feature-branch
+  $(basename "$0") --baseline-repo https://github.com/vernemq/vernemq.git --baseline-ref main \\
+      --candidate-repo https://github.com/vernemq/vernemq.git --candidate-ref v2.2.0 \\
+      --scenarios 01,03 --category core
 USAGE
     exit 1
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --baseline-version) BASELINE_VERSION="$2"; shift 2 ;;
-        --source)           SOURCE_PATH="$2"; shift 2 ;;
+        --baseline-repo)    BASELINE_REPO="$2"; shift 2 ;;
+        --baseline-ref)     BASELINE_REF="$2"; shift 2 ;;
+        --candidate-repo)   CANDIDATE_REPO="$2"; shift 2 ;;
+        --candidate-ref)    CANDIDATE_REF="$2"; shift 2 ;;
         --scenarios)        SCENARIOS="$2"; shift 2 ;;
+        --category)         CATEGORY="$2"; shift 2 ;;
         --cluster-size)     CLUSTER_SIZE="$2"; shift 2 ;;
         --load-multiplier)  LOAD_MULTIPLIER="$2"; shift 2 ;;
         --duration)         DURATION="$2"; shift 2 ;;
+        --lb)               export BENCH_USE_LB=1; shift ;;
         -h|--help)          usage ;;
         *)                  echo "Unknown option: $1"; usage ;;
     esac
 done
 
-if [[ -z "$BASELINE_VERSION" ]]; then
-    echo "ERROR: --baseline-version is required"
+if [[ -z "$BASELINE_REPO" ]]; then
+    echo "ERROR: --baseline-repo is required"
     usage
 fi
 
-if [[ -z "$SOURCE_PATH" ]]; then
-    echo "ERROR: --source is required"
+if [[ -z "$BASELINE_REF" ]]; then
+    echo "ERROR: --baseline-ref is required"
     usage
 fi
 
-SOURCE_PATH="$(cd "$SOURCE_PATH" && pwd)"
+if [[ -z "$CANDIDATE_REPO" ]]; then
+    echo "ERROR: --candidate-repo is required"
+    usage
+fi
+
+if [[ -z "$CANDIDATE_REF" ]]; then
+    echo "ERROR: --candidate-ref is required"
+    usage
+fi
 
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-INVENTORY="${ANSIBLE_DIR}/inventory/hosts"
-
-log() {
-    echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] $*"
-}
-
-run_ansible() {
-    local playbook="$1"; shift
-    log "Ansible: $playbook $*"
-    (cd "${ANSIBLE_DIR}" && ansible-playbook -i inventory/hosts "${playbook}" "$@") 2>&1
-}
 
 # =========================================================================
-# Parse inventory for node IPs and set environment
-# =========================================================================
-setup_env_from_inventory() {
-    if [[ ! -f "$INVENTORY" ]]; then
-        log "ERROR: Inventory not found at $INVENTORY"
-        exit 1
-    fi
-
-    # Extract VMQ node IPs (lines under [vmq_nodes] section)
-    local vmq_ips=""
-    local in_vmq=false
-    while IFS= read -r line; do
-        if [[ "$line" == "[vmq_nodes]" ]]; then
-            in_vmq=true; continue
-        elif [[ "$line" == "["* ]]; then
-            in_vmq=false; continue
-        fi
-        if $in_vmq && [[ -n "$line" && "$line" != "#"* ]]; then
-            local ip
-            ip=$(echo "$line" | awk '{print $1}')
-            if [[ -n "$ip" ]]; then
-                vmq_ips="${vmq_ips:+$vmq_ips }${ip}"
-            fi
-        fi
-    done < "$INVENTORY"
-
-    # Extract bench node IPs
-    local bench_ips=""
-    local in_bench=false
-    while IFS= read -r line; do
-        if [[ "$line" == "[bench_nodes]" ]]; then
-            in_bench=true; continue
-        elif [[ "$line" == "["* ]]; then
-            in_bench=false; continue
-        fi
-        if $in_bench && [[ -n "$line" && "$line" != "#"* ]]; then
-            local ip
-            ip=$(echo "$line" | awk '{print $1}')
-            if [[ -n "$ip" ]]; then
-                bench_ips="${bench_ips:+$bench_ips }${ip}"
-            fi
-        fi
-    done < "$INVENTORY"
-
-    # Extract monitor IP
-    local monitor_ip=""
-    local in_monitor=false
-    while IFS= read -r line; do
-        if [[ "$line" == "[monitor]" ]]; then
-            in_monitor=true; continue
-        elif [[ "$line" == "["* ]]; then
-            in_monitor=false; continue
-        fi
-        if $in_monitor && [[ -n "$line" && "$line" != "#"* ]]; then
-            monitor_ip=$(echo "$line" | awk '{print $1}')
-            break
-        fi
-    done < "$INVENTORY"
-
-    export VMQ_NODES="$vmq_ips"
-    export BENCH_NODES="$bench_ips"
-    export MONITOR_HOST="$monitor_ip"
-    export SSH_KEY="${SSH_KEY:-${HOME}/.ssh/vernemq-bench-home-ops.pem}"
-    export SSH_USER="${SSH_USER:-ec2-user}"
-
-    # Auto-detect cluster size if not specified
-    if [[ -z "$CLUSTER_SIZE" ]]; then
-        local -a nodes
-        read -ra nodes <<< "$VMQ_NODES"
-        CLUSTER_SIZE="${#nodes[@]}"
-    fi
-
-    log "VMQ_NODES:   $VMQ_NODES"
-    log "BENCH_NODES: $BENCH_NODES"
-    log "MONITOR:     $MONITOR_HOST"
-    log "CLUSTER_SIZE: $CLUSTER_SIZE"
-}
-
-# =========================================================================
-# Run A: Baseline (stock release)
+# Run A: Baseline
 # =========================================================================
 run_baseline() {
-    local tag="baseline-${BASELINE_VERSION}-${TIMESTAMP}"
+    local tag="baseline-${BASELINE_REF}-${TIMESTAMP}"
     local results_dir="${RESULTS_BASE}/${tag}"
     mkdir -p "$results_dir"
 
     log "========================================="
-    log "RUN A: Baseline VerneMQ ${BASELINE_VERSION}"
+    log "RUN A: Baseline (${BASELINE_REPO}@${BASELINE_REF})"
     log "========================================="
 
     # Teardown any previous
     run_ansible "teardown_cluster.yml" || true
 
-    # Deploy stock release
+    # Deploy via git clone
+    local ansible_auth_args=()
+    if [[ -n "${BENCH_MQTT_USERNAME:-}" && -n "${BENCH_MQTT_PASSWORD:-}" ]]; then
+        ansible_auth_args=(
+            -e "bench_auth_enabled=true"
+            -e "bench_mqtt_username=${BENCH_MQTT_USERNAME}"
+            -e "bench_mqtt_password=${BENCH_MQTT_PASSWORD}"
+        )
+    fi
     run_ansible "deploy_vernemq.yml" \
-        -e "build_mode=release" \
-        -e "vernemq_version=${BASELINE_VERSION}" \
-        -e "vernemq_version_family=2.x"
+        -e "build_mode=git_clone" \
+        -e "vernemq_git_repo=${BASELINE_REPO}" \
+        -e "vernemq_git_ref=${BASELINE_REF}" \
+        ${ansible_auth_args[@]+"${ansible_auth_args[@]}"}
 
     run_ansible "deploy_bench.yml"
     run_ansible "deploy_monitoring.yml" || true
-    run_ansible "configure_cluster.yml" \
-        -e "vmq_admin_cmd=/usr/sbin/vmq-admin"
+    run_ansible "configure_cluster.yml"
 
     # Run scenarios
     log "Running baseline scenarios..."
     export RESULTS_DIR="$results_dir"
-    export VMQ_ADMIN="sudo /usr/sbin/vmq-admin"
-    export VMQ_VERSION="$BASELINE_VERSION"
+    export VMQ_VERSION="$BASELINE_REF"
     export LOAD_MULTIPLIER
     export DURATION
     export STABILITY_DURATION
@@ -197,40 +144,47 @@ run_baseline() {
     run_scenarios
 
     log "Baseline complete: $results_dir"
-    echo "$tag"
+    echo "$tag" > "${RESULTS_BASE}/.baseline_tag"
 }
 
 # =========================================================================
-# Run B: Integration (source build)
+# Run B: Candidate
 # =========================================================================
-run_integration() {
-    local tag="integration-${TIMESTAMP}"
+run_candidate() {
+    local tag="candidate-${CANDIDATE_REF}-${TIMESTAMP}"
     local results_dir="${RESULTS_BASE}/${tag}"
     mkdir -p "$results_dir"
 
     log "========================================="
-    log "RUN B: Integration branch (from source)"
+    log "RUN B: Candidate (${CANDIDATE_REPO}@${CANDIDATE_REF})"
     log "========================================="
 
     # Teardown previous
     run_ansible "teardown_cluster.yml" || true
 
-    # Deploy from source
+    # Deploy via git clone
+    local ansible_auth_args=()
+    if [[ -n "${BENCH_MQTT_USERNAME:-}" && -n "${BENCH_MQTT_PASSWORD:-}" ]]; then
+        ansible_auth_args=(
+            -e "bench_auth_enabled=true"
+            -e "bench_mqtt_username=${BENCH_MQTT_USERNAME}"
+            -e "bench_mqtt_password=${BENCH_MQTT_PASSWORD}"
+        )
+    fi
     run_ansible "deploy_vernemq.yml" \
-        -e "build_mode=source" \
-        -e "vernemq_local_src_dir=${SOURCE_PATH}" \
-        -e "vernemq_version_family=integration"
+        -e "build_mode=git_clone" \
+        -e "vernemq_git_repo=${CANDIDATE_REPO}" \
+        -e "vernemq_git_ref=${CANDIDATE_REF}" \
+        ${ansible_auth_args[@]+"${ansible_auth_args[@]}"}
 
     run_ansible "deploy_bench.yml"
     run_ansible "deploy_monitoring.yml" || true
-    run_ansible "configure_cluster.yml" \
-        -e "vmq_admin_cmd=/opt/vernemq/bin/vmq-admin"
+    run_ansible "configure_cluster.yml"
 
     # Run scenarios
-    log "Running integration scenarios..."
+    log "Running candidate scenarios..."
     export RESULTS_DIR="$results_dir"
-    export VMQ_ADMIN="sudo /opt/vernemq/bin/vmq-admin"
-    export VMQ_VERSION="integration"
+    export VMQ_VERSION="$CANDIDATE_REF"
     export LOAD_MULTIPLIER
     export DURATION
     export STABILITY_DURATION
@@ -239,76 +193,55 @@ run_integration() {
 
     run_scenarios
 
-    log "Integration complete: $results_dir"
-    echo "$tag"
-}
-
-# =========================================================================
-# Scenario runner
-# =========================================================================
-run_scenarios() {
-    local scenario_dir="${BENCH_DIR}/scenarios"
-
-    # Resolve scenario list
-    local scenario_list
-    case "$SCENARIOS" in
-        standard)
-            local suite
-            suite=$(bash "${scenario_dir}/suite.sh" "${CLUSTER_SIZE:-3}" "${VMQ_VERSION}")
-            IFS=',' read -ra nums <<< "$suite"
-            ;;
-        *)
-            IFS=',' read -ra nums <<< "$SCENARIOS"
-            ;;
-    esac
-
-    for num in "${nums[@]}"; do
-        num=$(echo "$num" | xargs)
-        local padded
-        padded=$(printf "%02d" "$num")
-        local script
-        script=$(ls "${scenario_dir}/${padded}_"*.sh 2>/dev/null | head -1)
-        if [[ -z "$script" ]]; then
-            log "WARNING: No scenario matching ${padded}"
-            continue
-        fi
-
-        local scenario_name
-        scenario_name=$(basename "$script" .sh)
-        export SCENARIO_TAG="$scenario_name"
-
-        log "--- Running: $scenario_name ---"
-        if bash "$script" 2>&1 | tee -a "${RESULTS_DIR}/run.log"; then
-            log "--- $scenario_name: PASSED ---"
-        else
-            log "--- $scenario_name: FAILED ---"
-        fi
-    done
+    log "Candidate complete: $results_dir"
+    echo "$tag" > "${RESULTS_BASE}/.candidate_tag"
 }
 
 # =========================================================================
 # Main
 # =========================================================================
 
+trap cleanup_on_exit EXIT
+preflight_check
 setup_env_from_inventory
+
+export LB_HOST
+export BENCH_USE_LB="${BENCH_USE_LB:-0}"
+export BENCH_MQTT_USERNAME
+export BENCH_MQTT_PASSWORD
 
 log "========================================="
 log "VerneMQ A/B Comparison"
 log "========================================="
-log "Baseline:    ${BASELINE_VERSION}"
-log "Integration: source @ ${SOURCE_PATH}"
+log "Baseline:    ${BASELINE_REPO}@${BASELINE_REF}"
+log "Candidate:   ${CANDIDATE_REPO}@${CANDIDATE_REF}"
 log "Multiplier:  ${LOAD_MULTIPLIER}x"
 log "Scenarios:   ${SCENARIOS}"
+log "Category:    ${CATEGORY}"
 log "Duration:    ${DURATION}s per phase"
 log "Cluster:     ${CLUSTER_SIZE} nodes"
+log "LB:          ${LB_HOST:+$LB_HOST (BENCH_USE_LB=$BENCH_USE_LB)}${LB_HOST:-disabled}"
+log "Auth:        ${BENCH_MQTT_USERNAME:+enabled (user: $BENCH_MQTT_USERNAME)}${BENCH_MQTT_USERNAME:-disabled}"
 log "========================================="
 
-baseline_tag=$(run_baseline)
-integration_tag=$(run_integration)
+run_baseline
+baseline_tag=$(cat "${RESULTS_BASE}/.baseline_tag")
+run_candidate
+candidate_tag=$(cat "${RESULTS_BASE}/.candidate_tag")
+
+# Generate comparison report
+log "Generating comparison report..."
+python3 "${SCRIPT_DIR}/report.py" \
+    --baseline "${RESULTS_BASE}/${baseline_tag}" \
+    --candidate "${RESULTS_BASE}/${candidate_tag}" \
+    --output "${RESULTS_BASE}/comparison-${TIMESTAMP}" \
+    2>&1 | tee -a "${RESULTS_BASE}/comparison.log" || \
+    log "WARNING: Report generation failed (python3 or dependencies may be missing)"
 
 log "========================================="
 log "Comparison Complete"
 log "========================================="
-log "Baseline results:    ${RESULTS_BASE}/${baseline_tag}"
-log "Integration results: ${RESULTS_BASE}/${integration_tag}"
+log "Baseline results:  ${RESULTS_BASE}/${baseline_tag}"
+log "Candidate results: ${RESULTS_BASE}/${candidate_tag}"
+log "Report:            ${RESULTS_BASE}/comparison-${TIMESTAMP}/report.md"
 log "========================================="

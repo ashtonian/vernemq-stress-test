@@ -1,0 +1,4 @@
+# Optional: enables chart generation in report.py
+matplotlib>=3.5
+# Required by apply_profile.sh for YAML parsing
+PyYAML>=6.0

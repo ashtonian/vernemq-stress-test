@@ -21,7 +21,7 @@ RESULTS_DIR="${RESULTS_DIR:-./results}"
 START_EPOCH=""
 END_EPOCH=""
 MONITOR_HOST="${MONITOR_HOST:-monitor}"
-SSH_USER="${SSH_USER:-ubuntu}"
+SSH_USER="${SSH_USER:-ec2-user}"
 SSH_KEY="${SSH_KEY:-}"
 STEP=15
 
@@ -39,7 +39,7 @@ Options:
   --start-epoch N        Start timestamp (unix epoch, default: now - 1 hour)
   --end-epoch N          End timestamp (unix epoch, default: now)
   --monitor-host HOST    Hostname/IP of the Prometheus server for SCP (default: monitor)
-  --ssh-user USER        SSH user for SCP (default: ubuntu)
+  --ssh-user USER        SSH user for SCP (default: ec2-user)
   --ssh-key PATH         SSH private key path (optional)
   -h, --help             Show this help
 USAGE
@@ -249,7 +249,7 @@ query_scenario_windows() {
         done
 
         # Convert scenario JSON to CSV
-        if [[ -x "${SCRIPT_DIR}/prom_to_csv.py" ]]; then
+        if [[ -f "${SCRIPT_DIR}/prom_to_csv.py" ]]; then
             python3 "${SCRIPT_DIR}/prom_to_csv.py" \
                 --input-dir "$scenario_json_dir" \
                 --output-dir "$scenario_csv_dir" 2>/dev/null || \
@@ -265,7 +265,7 @@ query_scenario_windows() {
 convert_to_csv() {
     log "Step 4: Converting JSON results to CSV"
 
-    if [[ ! -x "${SCRIPT_DIR}/prom_to_csv.py" ]]; then
+    if [[ ! -f "${SCRIPT_DIR}/prom_to_csv.py" ]]; then
         log "WARNING: prom_to_csv.py not found or not executable, skipping CSV conversion"
         return 0
     fi

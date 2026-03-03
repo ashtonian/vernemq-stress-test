@@ -5,13 +5,13 @@
 
 - name: Download emqtt-bench prebuilt release
   ansible.builtin.get_url:
-    url: "https://github.com/emqx/emqtt-bench/releases/download/0.6.2/emqtt-bench-0.6.2-amzn2023-amd64.tar.gz"
+    url: "https://github.com/emqx/emqtt-bench/releases/download/{{ emqtt_bench_version }}/emqtt-bench-{{ emqtt_bench_version }}-{{ emqtt_bench_platform }}.tar.gz"
     dest: /tmp/emqtt-bench.tar.gz
     mode: "0644"
 
 - name: Create emqtt-bench directory
   ansible.builtin.file:
-    path: /opt/emqtt-bench
+    path: "{{ emqtt_bench_install_dir }}"
     state: directory
     mode: "0755"
   become: true
@@ -19,13 +19,13 @@
 - name: Extract emqtt-bench
   ansible.builtin.unarchive:
     src: /tmp/emqtt-bench.tar.gz
-    dest: /opt/emqtt-bench
+    dest: "{{ emqtt_bench_install_dir }}"
     remote_src: true
   become: true
 
 - name: Symlink emqtt_bench to /usr/local/bin
   ansible.builtin.file:
-    src: /opt/emqtt-bench/bin/emqtt_bench
+    src: "{{ emqtt_bench_install_dir }}/bin/emqtt_bench"
     dest: /usr/local/bin/emqtt_bench
     state: link
   become: true
@@ -53,43 +53,6 @@
 # Node exporter (for monitoring bench nodes)
 # --------------------------------------------------------------------------
 
-- name: Download node_exporter
-  ansible.builtin.get_url:
-    url: "https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz"
-    dest: /tmp/node_exporter.tar.gz
-    mode: "0644"
-
-- name: Extract node_exporter
-  ansible.builtin.unarchive:
-    src: /tmp/node_exporter.tar.gz
-    dest: /usr/local/bin
-    remote_src: true
-    extra_opts: ["--strip-components=1", "--wildcards", "*/node_exporter"]
-  become: true
-
-- name: Create node_exporter systemd unit
-  ansible.builtin.copy:
-    dest: /etc/systemd/system/node_exporter.service
-    mode: "0644"
-    content: |
-      [Unit]
-      Description=Prometheus Node Exporter
-      After=network.target
-
-      [Service]
-      Type=simple
-      ExecStart=/usr/local/bin/node_exporter
-      Restart=always
-      RestartSec=5
-
-      [Install]
-      WantedBy=multi-user.target
-  become: true
-
-- name: Enable and start node_exporter
-  ansible.builtin.systemd:
+- name: Install node_exporter
+  ansible.builtin.include_role:
     name: node_exporter
-    state: started
-    enabled: true
-    daemon_reload: true
-  become: true

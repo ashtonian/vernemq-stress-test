@@ -189,6 +189,43 @@
     mode: "0644"
   become: true
 
+- name: Generate self-signed TLS certificate for Grafana
+  ansible.builtin.command:
+    cmd: >-
+      openssl req -x509 -newkey rsa:2048 -nodes
+      -keyout {{ grafana_tls_key_path }}
+      -out {{ grafana_tls_cert_path }}
+      -days 365
+      -subj "/CN={{ inventory_hostname }}"
+    creates: "{{ grafana_tls_cert_path }}"
+  become: true
+  when: grafana_tls_enabled
+
+- name: Set TLS certificate ownership
+  ansible.builtin.file:
+    path: "{{ item }}"
+    owner: grafana
+    group: grafana
+    mode: "0600"
+  loop:
+    - "{{ grafana_tls_cert_path }}"
+    - "{{ grafana_tls_key_path }}"
+  become: true
+  when: grafana_tls_enabled
+
+- name: Configure Grafana for HTTPS
+  ansible.builtin.blockinfile:
+    path: /etc/grafana/grafana.ini
+    marker: "# {mark} ANSIBLE MANAGED - TLS"
+    insertafter: "\\[server\\]"
+    block: |
+      protocol = https
+      cert_file = {{ grafana_tls_cert_path }}
+      cert_key = {{ grafana_tls_key_path }}
+  become: true
+  when: grafana_tls_enabled
+  notify: restart grafana
+
 - name: Enable and start Grafana
   ansible.builtin.systemd:
     name: grafana-server
@@ -201,43 +238,6 @@
 # Node exporter on the monitor node itself
 # --------------------------------------------------------------------------
 
-- name: Download node_exporter
-  ansible.builtin.get_url:
-    url: "https://github.com/prometheus/node_exporter/releases/download/v1.7.0/node_exporter-1.7.0.linux-amd64.tar.gz"
-    dest: /tmp/node_exporter.tar.gz
-    mode: "0644"
-
-- name: Extract node_exporter
-  ansible.builtin.unarchive:
-    src: /tmp/node_exporter.tar.gz
-    dest: /usr/local/bin
-    remote_src: true
-    extra_opts: ["--strip-components=1", "--wildcards", "*/node_exporter"]
-  become: true
-
-- name: Create node_exporter systemd unit
-  ansible.builtin.copy:
-    dest: /etc/systemd/system/node_exporter.service
-    mode: "0644"
-    content: |
-      [Unit]
-      Description=Prometheus Node Exporter
-      After=network.target
-
-      [Service]
-      Type=simple
-      ExecStart=/usr/local/bin/node_exporter
-      Restart=always
-      RestartSec=5
-
-      [Install]
-      WantedBy=multi-user.target
-  become: true
-
-- name: Enable and start node_exporter
-  ansible.builtin.systemd:
+- name: Install node_exporter
+  ansible.builtin.include_role:
     name: node_exporter
-    state: started
-    enabled: true
-    daemon_reload: true
-  become: true

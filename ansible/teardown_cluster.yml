@@ -7,10 +7,8 @@
 - name: Teardown VerneMQ cluster
   hosts: vmq_nodes
   become: true
-  vars:
-    vernemq_install_dir: "/opt/vernemq"
-    vernemq_data_dir: "/var/lib/vernemq"
-    vernemq_log_dir: "/var/log/vernemq"
+  vars_files:
+    - roles/vernemq/defaults/main.yml
   tasks:
     - name: Stop VerneMQ service
       ansible.builtin.service:

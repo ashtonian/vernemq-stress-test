@@ -1,3 +1,7 @@
+# balanced_cluster.yaml — Balance and rebalance overlay
+# Overrides default.yaml values; see default.yaml for version-gating docs.
+# All settings below are integration-only — silently skipped on v2.1.x/v1.x.
+
 metadata:
   name: balanced_cluster
   description: "Balance and rebalance enabled with auto-interval"

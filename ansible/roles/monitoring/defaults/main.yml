@@ -7,4 +7,14 @@ prometheus_scrape_interval: "15s"
 
 # Grafana settings
 grafana_version: "10.2.3"
+# Intentionally simple — monitoring is only accessible from the VPC.
+# Override in your playbook or inventory vars for stricter environments.
 grafana_admin_password: "vernemq-bench"
+
+# TLS settings
+grafana_tls_enabled: true
+grafana_tls_cert_path: /etc/grafana/grafana.crt
+grafana_tls_key_path: /etc/grafana/grafana.key
+
+# Node exporter version
+node_exporter_version: "1.7.0"

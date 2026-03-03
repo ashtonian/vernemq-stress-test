@@ -102,11 +102,11 @@ echo "Generated merged vars: ${MERGED_VARS}"
 echo ""
 
 echo "Deploying VerneMQ with merged configuration..."
-(cd "${ANSIBLE_DIR}" && ansible-playbook deploy_vernemq.yml -e "@${MERGED_VARS}")
+(cd "${ANSIBLE_DIR}" && ansible-playbook -i "${ANSIBLE_INVENTORY:-${ANSIBLE_DIR}/inventory/hosts}" deploy_vernemq.yml -e "@${MERGED_VARS}")
 
 echo ""
 echo "Configuring cluster..."
-(cd "${ANSIBLE_DIR}" && ansible-playbook configure_cluster.yml)
+(cd "${ANSIBLE_DIR}" && ansible-playbook -i "${ANSIBLE_INVENTORY:-${ANSIBLE_DIR}/inventory/hosts}" configure_cluster.yml)
 
 echo ""
 echo "Profile applied successfully."

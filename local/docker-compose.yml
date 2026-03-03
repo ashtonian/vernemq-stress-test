@@ -1,3 +1,4 @@
+# Auto-generated — regenerate with: ./generate_compose.sh
 services:
   vmq1:
     build:
@@ -12,6 +13,16 @@ services:
     environment:
       VMQ_NODENAME: "VerneMQ@vmq1.local"
       VMQ_COOKIE: "vmqlocalbench"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    sysctls:
+      net.core.somaxconn: 65535
+      net.ipv4.tcp_max_syn_backlog: 65535
+      net.ipv4.ip_local_port_range: "1024 65535"
+      net.ipv4.tcp_tw_reuse: 1
+      net.ipv4.tcp_fin_timeout: 15
     volumes:
       - vmq1_data:/opt/vernemq/data
       - vmq1_log:/opt/vernemq/log
@@ -40,6 +51,16 @@ services:
       VMQ_NODENAME: "VerneMQ@vmq2.local"
       VMQ_DISCOVERY_NODE: "VerneMQ@vmq1.local"
       VMQ_COOKIE: "vmqlocalbench"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    sysctls:
+      net.core.somaxconn: 65535
+      net.ipv4.tcp_max_syn_backlog: 65535
+      net.ipv4.ip_local_port_range: "1024 65535"
+      net.ipv4.tcp_tw_reuse: 1
+      net.ipv4.tcp_fin_timeout: 15
     volumes:
       - vmq2_data:/opt/vernemq/data
       - vmq2_log:/opt/vernemq/log
@@ -71,6 +92,16 @@ services:
       VMQ_NODENAME: "VerneMQ@vmq3.local"
       VMQ_DISCOVERY_NODE: "VerneMQ@vmq1.local"
       VMQ_COOKIE: "vmqlocalbench"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    sysctls:
+      net.core.somaxconn: 65535
+      net.ipv4.tcp_max_syn_backlog: 65535
+      net.ipv4.ip_local_port_range: "1024 65535"
+      net.ipv4.tcp_tw_reuse: 1
+      net.ipv4.tcp_fin_timeout: 15
     volumes:
       - vmq3_data:/opt/vernemq/data
       - vmq3_log:/opt/vernemq/log
@@ -95,9 +126,18 @@ services:
     image: emqtt-bench-local
     hostname: bench
     container_name: bench
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    sysctls:
+      net.core.somaxconn: 65535
+      net.ipv4.tcp_max_syn_backlog: 65535
+      net.ipv4.ip_local_port_range: "1024 65535"
+      net.ipv4.tcp_tw_reuse: 1
+      net.ipv4.tcp_fin_timeout: 15
     volumes:
       - ./results:/results
-      - ./scenarios:/scenarios:ro
     networks:
       - vmq_cluster
     depends_on:

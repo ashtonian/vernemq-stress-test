@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # run_benchmark.sh - Main benchmark orchestration script
 #
-# Deploys VerneMQ (release or source), configures the cluster, runs selected
+# Deploys VerneMQ via git clone + build, configures the cluster, runs selected
 # benchmark scenarios, and collects results.
 #
 # Usage:
-#   ./run_benchmark.sh --version 2.1.2 --tag release-2.1.2 --scenarios all
-#   ./run_benchmark.sh --version integration --source /path/to/vernemq --tag int-test
-#   ./run_benchmark.sh --version integration --source . --scenarios 01,03,05
+#   ./run_benchmark.sh --repo https://github.com/vernemq/vernemq.git --ref v2.1.2 --tag baseline
+#   ./run_benchmark.sh --repo https://github.com/user/vernemq.git --ref feature-branch --tag feature-test --category core
+#   ./run_benchmark.sh --repo https://github.com/vernemq/vernemq.git --ref main --tag comparison --scenarios 01,03
 
 set -euo pipefail
 
@@ -16,14 +16,17 @@ BENCH_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SCENARIO_DIR="${BENCH_DIR}/scenarios"
 ANSIBLE_DIR="${BENCH_DIR}/ansible"
 
+source "${SCRIPT_DIR}/lib.sh"
+
 # ---------------------------------------------------------------------------
 # Defaults
 # ---------------------------------------------------------------------------
 
-VERSION=""
-SOURCE_PATH=""
+REPO=""
+REF=""
 TAG=""
 SCENARIOS="all"
+CATEGORY="all"
 RESULTS_BASE="${BENCH_DIR}/results"
 CLUSTER_SIZE=""
 PROFILE_PATH=""
@@ -38,78 +41,58 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Options:
-  --version VERSION    VerneMQ version: release number (e.g. 2.1.2) or "integration"
-  --source PATH        Path to VerneMQ source (required when --version=integration)
+  --repo URL           Git repository URL (required)
+  --ref REF            Git ref: tag, branch, or commit (required)
   --tag TAG            Label for this benchmark run (used in results directory)
   --scenarios LIST     Comma-separated scenario numbers/names, or "all", "standard", "chaos" (default: all)
+  --category CAT       Scenario category: core, integration, or all (default: all)
   --cluster-size N     Number of VMQ nodes (default: auto-detect from inventory)
   --profile PATH       Apply tunable profile before running (triggers redeploy)
-  --export-prom        Export full Prometheus data after all scenarios
+  --duration SECS      Duration per scenario phase in seconds
+  --export-prom        Export full Prometheus TSDB snapshot after all scenarios
+  --lb                 Route traffic through load balancer
   -h, --help           Show this help
 
 Examples:
-  $(basename "$0") --version 2.1.2 --tag baseline
-  $(basename "$0") --version integration --source ../vernemq --tag feature-xyz --scenarios 01,03
-  $(basename "$0") --version 2.1.2 --tag tuned --profile profiles/high_throughput.yaml --export-prom
-  $(basename "$0") --version 2.1.2 --tag chaos-run --scenarios chaos
-  $(basename "$0") --version 2.1.2 --tag selective --scenarios baseline,rebalance,flapping
+  $(basename "$0") --repo https://github.com/vernemq/vernemq.git --ref v2.1.2 --tag baseline
+  $(basename "$0") --repo https://github.com/user/vernemq.git --ref feature-branch --tag feature-test --category core
+  $(basename "$0") --repo https://github.com/vernemq/vernemq.git --ref main --tag comparison --scenarios 01,03
 USAGE
     exit 1
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --version)      VERSION="$2"; shift 2 ;;
-        --source)       SOURCE_PATH="$2"; shift 2 ;;
+        --repo)         REPO="$2"; shift 2 ;;
+        --ref)          REF="$2"; shift 2 ;;
         --tag)          TAG="$2"; shift 2 ;;
         --scenarios)    SCENARIOS="$2"; shift 2 ;;
+        --category)     CATEGORY="$2"; shift 2 ;;
         --cluster-size) CLUSTER_SIZE="$2"; shift 2 ;;
         --profile)      PROFILE_PATH="$2"; shift 2 ;;
+        --duration)     DURATION="$2"; shift 2 ;;
         --export-prom)  EXPORT_PROM=1; shift ;;
+        --lb)           export BENCH_USE_LB=1; shift ;;
         -h|--help)      usage ;;
         *)              echo "Unknown option: $1"; usage ;;
     esac
 done
 
-if [[ -z "$VERSION" ]]; then
-    echo "ERROR: --version is required"
+if [[ -z "$REPO" ]]; then
+    echo "ERROR: --repo is required"
     usage
 fi
 
-if [[ "$VERSION" == "integration" && -z "$SOURCE_PATH" ]]; then
-    echo "ERROR: --source is required when --version=integration"
+if [[ -z "$REF" ]]; then
+    echo "ERROR: --ref is required"
     usage
-fi
-
-# Resolve SOURCE_PATH to absolute for Ansible (which runs from a different cwd)
-if [[ -n "$SOURCE_PATH" ]]; then
-    SOURCE_PATH="$(cd "$SOURCE_PATH" && pwd)"
 fi
 
 if [[ -z "$TAG" ]]; then
-    TAG="${VERSION}-$(date +%Y%m%d-%H%M%S)"
+    TAG="${REF}-$(date +%Y%m%d-%H%M%S)"
 fi
 
-# ---------------------------------------------------------------------------
-# Version dispatch
-# ---------------------------------------------------------------------------
-
-case "$VERSION" in
-    integration)
-        BUILD_MODE="source"
-        VERSION_FAMILY="integration"
-        ;;
-    1.*)
-        BUILD_MODE="release"
-        VERSION_FAMILY="1.x"
-        ;;
-    *)
-        BUILD_MODE="release"
-        VERSION_FAMILY="2.x"
-        ;;
-esac
-
-export VMQ_VERSION="$VERSION"
+export VMQ_VERSION="$REF"
 export EXPORT_PROM
 
 RESULTS_DIR="${RESULTS_BASE}/${TAG}"
@@ -117,29 +100,25 @@ mkdir -p "$RESULTS_DIR"
 LOG_FILE="${RESULTS_DIR}/run.log"
 
 # ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-
-log() {
-    local ts
-    ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-    echo "[$ts] $*" | tee -a "$LOG_FILE"
-}
-
-run_ansible() {
-    local playbook="$1"; shift
-    log "Running Ansible playbook: $playbook $*"
-    (cd "${ANSIBLE_DIR}" && ansible-playbook "${playbook}" "$@") 2>&1 | tee -a "$LOG_FILE"
-}
-
-# ---------------------------------------------------------------------------
 # Resolve scenarios
 # ---------------------------------------------------------------------------
 
 resolve_scenarios() {
     local input="$1"
-    local all_scenarios
-    all_scenarios=$(ls "${SCENARIO_DIR}"/[0-9]*.sh 2>/dev/null | sort)
+    local all_scenarios=""
+
+    # Build scenario list based on category
+    case "$CATEGORY" in
+        core)
+            all_scenarios=$(ls "${SCENARIO_DIR}/core/"[0-9]*.sh 2>/dev/null | sort)
+            ;;
+        integration)
+            all_scenarios=$(ls "${SCENARIO_DIR}/integration/"[0-9]*.sh 2>/dev/null | sort)
+            ;;
+        all|*)
+            all_scenarios=$(ls "${SCENARIO_DIR}/core/"[0-9]*.sh "${SCENARIO_DIR}/integration/"[0-9]*.sh 2>/dev/null | sort)
+            ;;
+    esac
 
     case "$input" in
         all)
@@ -147,26 +126,24 @@ resolve_scenarios() {
             return
             ;;
         standard)
-            # Use suite.sh to get curated list for current cluster size
             local suite_list
-            suite_list=$(bash "${SCENARIO_DIR}/suite.sh" "${CLUSTER_SIZE:-10}" "${VERSION}")
-            # Resolve the comma-sep numbers
+            suite_list=$(bash "${SCENARIO_DIR}/suite.sh" "${CLUSTER_SIZE:-3}" "${REF}")
             resolve_scenarios "$suite_list"
             return
             ;;
         chaos)
-            # Find scenarios tagged chaos
-            grep -rl "# Tags:.*chaos" "${SCENARIO_DIR}"/[0-9]*.sh 2>/dev/null | sort
+            echo "$all_scenarios" | while read -r f; do
+                grep -l "# Tags:.*chaos" "$f" 2>/dev/null || true
+            done
             return
             ;;
     esac
 
-    # Try comma-separated: could be numbers (01,03) or names (baseline,rebalance,flapping)
+    # Try comma-separated: could be numbers or names
     local result=""
     IFS=',' read -ra items <<< "$input"
     for item in "${items[@]}"; do
-        item=$(echo "$item" | xargs)  # trim whitespace
-        # Try as number first
+        item=$(echo "$item" | xargs)
         if [[ "$item" =~ ^[0-9]+$ ]]; then
             local padded
             padded=$(printf "%02d" "$item")
@@ -178,9 +155,8 @@ resolve_scenarios() {
                 continue
             fi
         fi
-        # Try as name substring
         local match
-        match=$(echo "$all_scenarios" | grep -i "$item" || true)
+        match=$(echo "$all_scenarios" | grep -Fi "$item" || true)
         if [[ -n "$match" ]]; then
             result="${result:+$result
 }$match"
@@ -199,19 +175,34 @@ main() {
     local RUN_START_EPOCH
     RUN_START_EPOCH=$(date +%s)
 
+    preflight_check
+    setup_env_from_inventory
+    export PROMETHEUS_URL
+    export SSH_KEY
+    export SSH_USER
+    export SSH_OPTS
+
+    # Export LB and auth configuration
+    export LB_HOST
+    export BENCH_USE_LB="${BENCH_USE_LB:-0}"
+    export BENCH_MQTT_USERNAME
+    export BENCH_MQTT_PASSWORD
+
     log "========================================="
     log "VerneMQ Benchmark Run"
     log "========================================="
-    log "Version:    $VERSION"
-    log "Family:     $VERSION_FAMILY"
-    log "Build mode: $BUILD_MODE"
-    log "Source:     ${SOURCE_PATH:-N/A}"
+    log "Repo:       $REPO"
+    log "Ref:        $REF"
+    log "Build mode: git_clone"
     log "Tag:        $TAG"
     log "Scenarios:  $SCENARIOS"
+    log "Category:   $CATEGORY"
     log "Cluster:    ${CLUSTER_SIZE:-auto}"
     log "Profile:    ${PROFILE_PATH:-none}"
     log "Prom export:${EXPORT_PROM}"
     log "Results:    $RESULTS_DIR"
+    log "LB:         ${LB_HOST:+$LB_HOST (BENCH_USE_LB=$BENCH_USE_LB)}${LB_HOST:-disabled}"
+    log "Auth:       ${BENCH_MQTT_USERNAME:+enabled (user: $BENCH_MQTT_USERNAME)}${BENCH_MQTT_USERNAME:-disabled}"
     log "========================================="
 
     # Step 1: Teardown any previous deployment
@@ -219,18 +210,20 @@ main() {
     run_ansible "teardown_cluster.yml" || log "WARNING: Teardown had errors (may be first run)"
 
     # Step 2: Deploy VerneMQ
-    log "Step 2: Deploy VerneMQ ($VERSION)"
-    if [[ "$VERSION" == "integration" ]]; then
-        run_ansible "deploy_vernemq.yml" \
-            -e "build_mode=source" \
-            -e "vernemq_local_src_dir=${SOURCE_PATH}" \
-            -e "vernemq_version_family=${VERSION_FAMILY}"
-    else
-        run_ansible "deploy_vernemq.yml" \
-            -e "build_mode=release" \
-            -e "vernemq_version=${VERSION}" \
-            -e "vernemq_version_family=${VERSION_FAMILY}"
+    log "Step 2: Deploy VerneMQ (${REPO}@${REF})"
+    local ansible_auth_args=()
+    if [[ -n "${BENCH_MQTT_USERNAME:-}" && -n "${BENCH_MQTT_PASSWORD:-}" ]]; then
+        ansible_auth_args=(
+            -e "bench_auth_enabled=true"
+            -e "bench_mqtt_username=${BENCH_MQTT_USERNAME}"
+            -e "bench_mqtt_password=${BENCH_MQTT_PASSWORD}"
+        )
     fi
+    run_ansible "deploy_vernemq.yml" \
+        -e "build_mode=git_clone" \
+        -e "vernemq_git_repo=${REPO}" \
+        -e "vernemq_git_ref=${REF}" \
+        ${ansible_auth_args[@]+"${ansible_auth_args[@]}"}
     run_ansible "deploy_bench.yml"
     run_ansible "deploy_monitoring.yml"
 
@@ -260,8 +253,17 @@ main() {
     local scenario_pass=0
     local scenario_fail=0
 
+    local first_scenario=true
     while IFS= read -r scenario_script; do
         [[ -z "$scenario_script" ]] && continue
+
+        # Reset cluster between scenarios (not before first)
+        if [[ "$first_scenario" == "true" ]]; then
+            first_scenario=false
+        else
+            reset_cluster_state
+        fi
+
         local scenario_name
         scenario_name=$(basename "$scenario_script" .sh)
 
@@ -316,8 +318,10 @@ main() {
     # Save summary
     {
         echo "tag,$TAG"
-        echo "version,$VERSION"
-        echo "version_family,$VERSION_FAMILY"
+        echo "version,$REF"
+        echo "repo,$REPO"
+        echo "ref,$REF"
+        echo "category,$CATEGORY"
         echo "total_scenarios,$scenario_count"
         echo "passed,$scenario_pass"
         echo "failed,$scenario_fail"
@@ -329,4 +333,5 @@ main() {
     fi
 }
 
+trap cleanup_on_exit EXIT
 main "$@"
