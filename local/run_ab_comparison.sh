@@ -58,7 +58,7 @@ CATEGORY="all"
 NUM_NODES=3
 MONITORING=0
 DURATION="${DURATION:-180}"
-LOCAL_SCALE="${LOCAL_SCALE:-0.4}"
+LOCAL_SCALE="${LOCAL_SCALE:-0.8}"
 PROFILE="local"
 LB=0
 AUTH=1
@@ -257,6 +257,17 @@ run_variant() {
     log "========================================="
 
     cd "$SCRIPT_DIR"
+
+    # Set version family: candidate uses integration, baseline uses 2.x
+    if [[ "$image_name" == "$CANDIDATE_IMAGE" ]]; then
+        export VMQ_VERSION_FAMILY="integration"
+    else
+        export VMQ_VERSION_FAMILY="2.x"
+    fi
+    log "Version family: ${VMQ_VERSION_FAMILY}"
+
+    # Regenerate compose with correct VMQ_VERSION_FAMILY
+    bash "${SCRIPT_DIR}/generate_compose.sh" "${COMPOSE_ARGS[@]}"
 
     # Tag the variant image so docker-compose uses it
     docker tag "$image_name" vmq-local-bench

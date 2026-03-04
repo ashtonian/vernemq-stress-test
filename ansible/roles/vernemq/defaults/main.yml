@@ -82,21 +82,25 @@ rebalance_auto_interval: 0
 
 # Cluster health (integration only)
 cluster_ready_quorum: "1.0"
+cluster_ready_rpc_timeout: 5000
 dead_node_cleanup_timeout: "0"
 
 # Connection pool (integration only)
-connection_pool_size: 4
 outgoing_clustering_connection_count: 4
 
 # Clustering reconnect (integration only)
 outgoing_clustering_reconnect_base_delay: 1000
-outgoing_clustering_reconnect_max_delay: 30000
+outgoing_clustering_reconnect_max_delay: 5000
+outgoing_clustering_buffer_drop_policy: "lifo"
 
-# Registry trie workers (integration only)
+# Registry (integration only)
 reg_trie_workers: 8
+reg_sync_shards: 8
 
 # Gossip settings (integration only)
-gossip_interval: 10000
+gossip_interval: 15000
+fast_gossip_interval: 2000
+fast_gossip_duration: 30000
 
 # Version family: "auto" auto-detects, or specify "1.x", "2.x", "integration"
 vernemq_version_family: "auto"

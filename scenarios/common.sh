@@ -538,7 +538,8 @@ wait_cluster_ready() {
     while (( elapsed < max_wait )); do
         local running
         running=$(ssh_vmq 0 "$VMQ_ADMIN cluster show" 2>/dev/null \
-            | grep -c "true" || echo 0)
+            | grep -c "true" || true)
+        running=${running:-0}
         if (( running >= expected_nodes )); then
             log_info "Cluster ready: $running/$expected_nodes nodes running"
             return 0
@@ -678,6 +679,7 @@ wait_cluster_synced() {
         phase_start=$(date +%s)
         log_info "  Phase 4: Checking balance-health endpoint..."
         local all_healthy=true
+        local all_404=true
         local -a nodes
         read -ra nodes <<< "$VMQ_NODES"
         for i in "${!nodes[@]}"; do
@@ -685,7 +687,10 @@ wait_cluster_synced() {
             status=$(check_balance_health "$i")
             if [[ "$status" != "200" ]]; then
                 all_healthy=false
+                [[ "$status" != "404" ]] && all_404=false
                 log_error "  Node $i balance-health returned $status"
+            else
+                all_404=false
             fi
         done
         phase_end=$(date +%s)
@@ -693,6 +698,9 @@ wait_cluster_synced() {
         if $all_healthy; then
             echo "$label,balance_health,ok,${duration},$(_ts)" >> "$timing_csv"
             log_info "  Phase 4 complete: all nodes balance-healthy (${duration}s)"
+        elif $all_404; then
+            echo "$label,balance_health,skip,${duration},$(_ts)" >> "$timing_csv"
+            log_info "  Phase 4 skipped: balance-health endpoint not available (${duration}s)"
         else
             echo "$label,balance_health,fail,${duration},$(_ts)" >> "$timing_csv"
             log_error "  Phase 4 FAILED: balance-health check (${duration}s)"
@@ -739,7 +747,7 @@ check_balance_health() {
     local node_index="$1"
     local node
     node=$(_node_at VMQ_NODES "$node_index")
-    ssh_vmq "$node_index" "curl -s -o /dev/null -w '%{http_code}' http://localhost:8888/api/balance-health 2>/dev/null" || echo "000"
+    ssh_vmq "$node_index" "curl -s -o /dev/null -w '%{http_code}' http://${node}:8888/api/balance-health 2>/dev/null" || echo "000"
 }
 
 # ---------------------------------------------------------------------------

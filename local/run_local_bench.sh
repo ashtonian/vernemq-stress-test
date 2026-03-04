@@ -52,7 +52,7 @@ SCENARIOS="standard"
 CATEGORY="all"
 PROFILE="local"
 DURATION=""
-LOCAL_SCALE="${LOCAL_SCALE:-0.4}"
+LOCAL_SCALE="${LOCAL_SCALE:-0.8}"
 KEEP=0
 LB=0
 AUTH=1
@@ -205,6 +205,16 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Generate docker-compose.yml
 # ---------------------------------------------------------------------------
+
+# Auto-detect version family from ref name
+if [[ -z "${VMQ_VERSION_FAMILY:-}" ]]; then
+    if [[ "${REF:-}" == *integration* ]]; then
+        export VMQ_VERSION_FAMILY="integration"
+    else
+        export VMQ_VERSION_FAMILY="2.x"
+    fi
+fi
+log "Version family: ${VMQ_VERSION_FAMILY}"
 
 log "Generating docker-compose.yml (${NUM_NODES} nodes$([ "$MONITORING" -eq 1 ] && echo ' + monitoring'))..."
 COMPOSE_ARGS=(--nodes "$NUM_NODES")

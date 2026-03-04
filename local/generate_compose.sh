@@ -45,6 +45,124 @@ if (( NUM_NODES < 1 )); then
 fi
 
 # ---------------------------------------------------------------------------
+# Read tunables from profile (single source of truth)
+# ---------------------------------------------------------------------------
+PROFILE_YAML="${SCRIPT_DIR}/../profiles/default.yaml"
+BASE_ENV_BLOCK=""
+INTEGRATION_ENV_BLOCK=""
+
+if [[ -f "$PROFILE_YAML" ]]; then
+    # Map profile YAML keys → VMQ_ env var names
+    # Uses simple grep/sed — no python/yq dependency
+    read_tunable() {
+        local key="$1" envvar="$2" target="${3:-base}"
+        local val
+        val=$(grep -E "^\s+${key}:" "$PROFILE_YAML" | head -1 | sed 's/.*: *//; s/"//g; s/ *$//')
+        if [[ -n "$val" ]]; then
+            # Allow env override
+            val="${!envvar:-$val}"
+            if [[ "$target" == "integration" ]]; then
+                INTEGRATION_ENV_BLOCK="${INTEGRATION_ENV_BLOCK}      ${envvar}: \"${val}\"
+"
+            else
+                BASE_ENV_BLOCK="${BASE_ENV_BLOCK}      ${envvar}: \"${val}\"
+"
+            fi
+        fi
+    }
+
+    # --- Base tunables (all versions) ---
+
+    # Erlang VM
+    read_tunable erlang_async_threads             VMQ_ERLANG_ASYNC_THREADS
+    read_tunable erlang_max_ports                 VMQ_ERLANG_MAX_PORTS
+    read_tunable erlang_max_processes             VMQ_ERLANG_MAX_PROCESSES
+    read_tunable erlang_distribution_buffer_size  VMQ_ERLANG_DISTRIBUTION_BUFFER_SIZE
+
+    # Listeners
+    read_tunable mqtt_listener_max_connections    VMQ_MQTT_LISTENER_MAX_CONNECTIONS
+    read_tunable mqtt_listener_nr_of_acceptors    VMQ_MQTT_LISTENER_NR_OF_ACCEPTORS
+    read_tunable listener_max_connections         VMQ_LISTENER_MAX_CONNECTIONS
+    read_tunable listener_nr_of_acceptors         VMQ_LISTENER_NR_OF_ACCEPTORS
+    read_tunable tcp_listen_options               VMQ_TCP_LISTEN_OPTIONS
+    read_tunable listener_tcp_allowed_protocol_versions  VMQ_LISTENER_TCP_ALLOWED_PROTOCOL_VERSIONS
+    read_tunable listener_tcp_proxy_protocol      VMQ_LISTENER_TCP_PROXY_PROTOCOL
+    read_tunable listener_ws_allowed_protocol_versions   VMQ_LISTENER_WS_ALLOWED_PROTOCOL_VERSIONS
+    read_tunable listener_ws_proxy_protocol       VMQ_LISTENER_WS_PROXY_PROTOCOL
+
+    # Queue / message settings
+    read_tunable max_inflight_messages            VMQ_MAX_INFLIGHT_MESSAGES
+    read_tunable max_online_messages              VMQ_MAX_ONLINE_MESSAGES
+    read_tunable max_offline_messages             VMQ_MAX_OFFLINE_MESSAGES
+    read_tunable queue_deliver_mode               VMQ_QUEUE_DELIVER_MODE
+    read_tunable queue_type                       VMQ_QUEUE_TYPE
+    read_tunable max_message_rate                 VMQ_MAX_MESSAGE_RATE
+    read_tunable max_message_size                 VMQ_MAX_MESSAGE_SIZE
+    read_tunable upgrade_outgoing_qos             VMQ_UPGRADE_OUTGOING_QOS
+
+    # MQTT protocol
+    read_tunable mqtt_connect_timeout             VMQ_MQTT_CONNECT_TIMEOUT
+    read_tunable disconnect_on_unauthorized_publish_v3  VMQ_DISCONNECT_ON_UNAUTH_PUB_V3
+    read_tunable persistent_client_expiration     VMQ_PERSISTENT_CLIENT_EXPIRATION
+
+    # Session / registration
+    read_tunable coordinate_registrations         VMQ_COORDINATE_REGISTRATIONS
+    read_tunable shared_subscription_policy       VMQ_SHARED_SUBSCRIPTION_POLICY
+
+    # Netsplit behavior
+    read_tunable allow_register_during_netsplit    VMQ_ALLOW_REGISTER_DURING_NETSPLIT
+    read_tunable allow_publish_during_netsplit     VMQ_ALLOW_PUBLISH_DURING_NETSPLIT
+    read_tunable allow_subscribe_during_netsplit   VMQ_ALLOW_SUBSCRIBE_DURING_NETSPLIT
+    read_tunable allow_unsubscribe_during_netsplit VMQ_ALLOW_UNSUBSCRIBE_DURING_NETSPLIT
+
+    # Storage
+    read_tunable leveldb_maximum_memory_percent   VMQ_LEVELDB_MAX_MEM_PCT
+
+    # --- 2.x+ tunables ---
+    read_tunable outgoing_clustering_buffer_size  VMQ_OUTGOING_CLUSTERING_BUFFER_SIZE
+
+    # --- Integration-only tunables ---
+    if [[ "${VMQ_VERSION_FAMILY:-2.x}" == "integration" ]]; then
+        # Cluster health
+        read_tunable cluster_ready_quorum         VMQ_CLUSTER_READY_QUORUM          integration
+        read_tunable cluster_ready_rpc_timeout    VMQ_CLUSTER_READY_RPC_TIMEOUT     integration
+        read_tunable dead_node_cleanup_timeout    VMQ_DEAD_NODE_CLEANUP_TIMEOUT     integration
+
+        # Registry
+        read_tunable reg_trie_workers             VMQ_REG_TRIE_WORKERS              integration
+        read_tunable reg_sync_shards              VMQ_REG_SYNC_SHARDS               integration
+
+        # Clustering connections
+        read_tunable outgoing_clustering_connection_count       VMQ_OUTGOING_CLUSTERING_CONNECTION_COUNT    integration
+        read_tunable outgoing_clustering_reconnect_base_delay   VMQ_OUTGOING_CLUSTERING_RECONNECT_BASE_DELAY integration
+        read_tunable outgoing_clustering_reconnect_max_delay    VMQ_OUTGOING_CLUSTERING_RECONNECT_MAX_DELAY  integration
+        read_tunable outgoing_clustering_buffer_drop_policy     VMQ_OUTGOING_CLUSTERING_BUFFER_DROP_POLICY   integration
+
+        # Balance
+        read_tunable balance_enabled              VMQ_BALANCE_ENABLED               integration
+        read_tunable balance_reject_enabled       VMQ_BALANCE_REJECT_ENABLED        integration
+        read_tunable balance_threshold            VMQ_BALANCE_THRESHOLD             integration
+        read_tunable balance_hysteresis           VMQ_BALANCE_HYSTERESIS            integration
+        read_tunable balance_min_connections      VMQ_BALANCE_MIN_CONNECTIONS       integration
+        read_tunable balance_check_interval       VMQ_BALANCE_CHECK_INTERVAL        integration
+
+        # Rebalance
+        read_tunable rebalance_enabled            VMQ_REBALANCE_ENABLED             integration
+        read_tunable rebalance_threshold          VMQ_REBALANCE_THRESHOLD           integration
+        read_tunable rebalance_batch_size         VMQ_REBALANCE_BATCH_SIZE          integration
+        read_tunable rebalance_cooldown           VMQ_REBALANCE_COOLDOWN            integration
+        read_tunable rebalance_on_node_join       VMQ_REBALANCE_ON_NODE_JOIN        integration
+        read_tunable rebalance_stable_interval    VMQ_REBALANCE_STABLE_INTERVAL     integration
+        read_tunable rebalance_auto_interval      VMQ_REBALANCE_AUTO_INTERVAL       integration
+
+        # Gossip
+        read_tunable gossip_interval              VMQ_SWC_GOSSIP_INTERVAL           integration
+        read_tunable fast_gossip_interval         VMQ_SWC_FAST_GOSSIP_INTERVAL      integration
+        read_tunable fast_gossip_duration         VMQ_SWC_FAST_GOSSIP_DURATION      integration
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Generate docker-compose.yml
 # ---------------------------------------------------------------------------
 
@@ -78,9 +196,16 @@ cat >> "$OUTPUT" <<EOF
     environment:
       VMQ_NODENAME: "VerneMQ@vmq1.local"
       VMQ_COOKIE: "vmqlocalbench"
+      VMQ_VERSION_FAMILY: "${VMQ_VERSION_FAMILY:-2.x}"
 EOF
 if [[ -n "$AUTH_ENV_BLOCK" ]]; then
     echo "$AUTH_ENV_BLOCK" >> "$OUTPUT"
+fi
+if [[ -n "$BASE_ENV_BLOCK" ]]; then
+    printf '%s' "$BASE_ENV_BLOCK" >> "$OUTPUT"
+fi
+if [[ -n "$INTEGRATION_ENV_BLOCK" ]]; then
+    printf '%s' "$INTEGRATION_ENV_BLOCK" >> "$OUTPUT"
 fi
 cat >> "$OUTPUT" <<EOF
     ulimits:
@@ -128,9 +253,16 @@ for (( i=2; i<=NUM_NODES; i++ )); do
       VMQ_NODENAME: "VerneMQ@vmq${i}.local"
       VMQ_DISCOVERY_NODE: "VerneMQ@vmq1.local"
       VMQ_COOKIE: "vmqlocalbench"
+      VMQ_VERSION_FAMILY: "${VMQ_VERSION_FAMILY:-2.x}"
 EOF
     if [[ -n "$AUTH_ENV_BLOCK" ]]; then
         echo "$AUTH_ENV_BLOCK" >> "$OUTPUT"
+    fi
+    if [[ -n "$BASE_ENV_BLOCK" ]]; then
+        printf '%s' "$BASE_ENV_BLOCK" >> "$OUTPUT"
+    fi
+    if [[ -n "$INTEGRATION_ENV_BLOCK" ]]; then
+        printf '%s' "$INTEGRATION_ENV_BLOCK" >> "$OUTPUT"
     fi
     cat >> "$OUTPUT" <<EOF
     ulimits:

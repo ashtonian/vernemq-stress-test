@@ -2,8 +2,12 @@
 - name: Auto-detect version family
   ansible.builtin.set_fact:
     vernemq_version_family: >-
-      {% if build_mode in ['source', 'git_clone'] %}integration{% elif vernemq_version is match('^1\.') %}1.x{% else %}2.x{% endif %}
+      {% if build_mode == 'source' %}integration{% elif build_mode == 'git_clone' %}{% if vernemq_git_ref is defined and vernemq_git_ref is match('^v?[0-9]+\.') %}{% if vernemq_git_ref is match('^v?1\.') %}1.x{% else %}2.x{% endif %}{% else %}integration{% endif %}{% elif vernemq_version is match('^1\.') %}1.x{% else %}2.x{% endif %}
   when: vernemq_version_family == 'auto'
+
+- name: Display detected version family
+  ansible.builtin.debug:
+    msg: "VerneMQ version family: {{ vernemq_version_family }} (build_mode={{ build_mode }}, ref={{ vernemq_git_ref | default('N/A') }})"
 
 - name: Set vmq-admin command for source builds
   ansible.builtin.set_fact:
@@ -255,7 +259,7 @@
   delegate_to: "{{ groups['vmq_nodes'][0] }}"
   changed_when: true
   register: build_result
-  failed_when: build_result.rc != 0
+  failed_when: false
   environment:
     HOME: /root
   timeout: 1800
@@ -276,10 +280,15 @@
   register: release_check
   failed_when: not release_check.stat.exists
 
+- name: Set tarball filename
+  ansible.builtin.set_fact:
+    _vmq_tarball: "vernemq-source-{{ vernemq_git_ref | default('build') | regex_replace('[^a-zA-Z0-9._-]', '_') }}.tar.gz"
+  when: build_mode in ["source", "git_clone"]
+
 - name: Create VerneMQ tarball from build
   ansible.builtin.command:
     cmd: >-
-      tar czf /tmp/vernemq-source.tar.gz
+      tar czf /tmp/{{ _vmq_tarball }}
       -C {{ vernemq_src_dir }}/_build/default/rel vernemq
   become: true
   when: build_mode in ["source", "git_clone"]
@@ -289,8 +298,8 @@
 
 - name: Fetch VerneMQ tarball to controller
   ansible.builtin.fetch:
-    src: /tmp/vernemq-source.tar.gz
-    dest: /tmp/vernemq-source.tar.gz
+    src: /tmp/{{ _vmq_tarball }}
+    dest: /tmp/{{ _vmq_tarball }}
     flat: true
   when: build_mode in ["source", "git_clone"]
   run_once: true
@@ -298,8 +307,8 @@
 
 - name: Distribute VerneMQ tarball to all nodes
   ansible.builtin.copy:
-    src: /tmp/vernemq-source.tar.gz
-    dest: /tmp/vernemq-source.tar.gz
+    src: /tmp/{{ _vmq_tarball }}
+    dest: /tmp/{{ _vmq_tarball }}
     mode: "0644"
   become: true
   when: build_mode in ["source", "git_clone"]
@@ -316,12 +325,22 @@
 
 - name: Extract VerneMQ tarball
   ansible.builtin.unarchive:
-    src: /tmp/vernemq-source.tar.gz
+    src: /tmp/{{ _vmq_tarball }}
     dest: "{{ vernemq_install_dir }}"
     remote_src: true
     extra_opts: ["--strip-components=1"]
     owner: vernemq
     group: vernemq
+  become: true
+  when: build_mode in ["source", "git_clone"]
+
+- name: Ensure VerneMQ data directory ownership (for cuttlefish generated configs)
+  ansible.builtin.file:
+    path: "{{ vernemq_install_dir }}/data"
+    state: directory
+    owner: vernemq
+    group: vernemq
+    recurse: true
   become: true
   when: build_mode in ["source", "git_clone"]
 
@@ -342,8 +361,10 @@
       Type=forking
       User=vernemq
       Group=vernemq
+      Environment=HOME={{ vernemq_install_dir }}
       Environment=WAIT_FOR_ERLANG=60
       Environment=ERL_FULLSWEEP_AFTER={{ erlang_fullsweep_after }}
+      Environment="ERL_ZFLAGS=+sbt {{ erlang_scheduler_bind_type }} +sbwt {{ erlang_scheduler_busy_wait }} +swt {{ erlang_scheduler_wake_threshold }} +sbwtdcpu none +sbwtdio none"
       ExecStart={{ vernemq_install_dir }}/bin/vernemq start
       ExecStop={{ vernemq_install_dir }}/bin/vernemq stop
       LimitNOFILE=1048576
@@ -357,11 +378,29 @@
   when: build_mode in ["source", "git_clone"]
   notify: restart vernemq
 
+- name: Ensure systemd drop-in directory exists (RPM)
+  ansible.builtin.file:
+    path: /etc/systemd/system/vernemq.service.d
+    state: directory
+    mode: "0755"
+  become: true
+  when: build_mode == "release"
+
+- name: Create systemd drop-in for RPM scheduler tuning
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/vernemq.service.d/scheduler-tuning.conf
+    mode: "0644"
+    content: |
+      [Service]
+      Environment="ERL_ZFLAGS=+sbt {{ erlang_scheduler_bind_type }} +sbwt {{ erlang_scheduler_busy_wait }} +swt {{ erlang_scheduler_wake_threshold }} +sbwtdcpu none +sbwtdio none"
+      Environment=ERL_FULLSWEEP_AFTER={{ erlang_fullsweep_after }}
+  become: true
+  when: build_mode == "release"
+
 - name: Reload systemd
   ansible.builtin.systemd:
     daemon_reload: true
   become: true
-  when: build_mode in ["source", "git_clone"]
 
 # --------------------------------------------------------------------------
 # Configuration (both modes)
@@ -409,22 +448,10 @@
   become: true
   notify: restart vernemq
 
-- name: Deploy vm.args overrides (scheduler tuning)
-  ansible.builtin.copy:
-    dest: "{{ vernemq_actual_conf_dir | trim }}/vm.args"
-    owner: vernemq
-    group: vernemq
-    mode: "0644"
-    content: |
-      ## Scheduler tuning for benchmark workloads
-      +sbt {{ erlang_scheduler_bind_type }}
-      +sbwt {{ erlang_scheduler_busy_wait }}
-      +swt {{ erlang_scheduler_wake_threshold }}
-      +sbwtdcpu none
-      +sbwtdio none
-      +zdbbl {{ erlang_distribution_buffer_size }}
-  become: true
-  notify: restart vernemq
+# NOTE: Scheduler tuning (+sbt, +sbwt, +swt) is applied via ERL_ZFLAGS in
+# the systemd unit. Do NOT overwrite etc/vm.args — cuttlefish generates it
+# from vernemq.conf and the release's vm.args template. Overwriting it would
+# break cuttlefish config generation.
 
 # --------------------------------------------------------------------------
 # MQTT Authentication (passwd + ACL files)

@@ -94,16 +94,18 @@ outgoing_clustering_buffer_size = {{ outgoing_clustering_buffer_size }}
 ## ---------------------------------------------------------------------------
 outgoing_clustering_reconnect_base_delay = {{ outgoing_clustering_reconnect_base_delay }}
 outgoing_clustering_reconnect_max_delay = {{ outgoing_clustering_reconnect_max_delay }}
+outgoing_clustering_buffer_drop_policy = {{ outgoing_clustering_buffer_drop_policy }}
 
 ## ---------------------------------------------------------------------------
-## Registry trie workers (integration only)
+## Registry (integration only)
 ## ---------------------------------------------------------------------------
 reg_trie_workers = {{ reg_trie_workers }}
+reg_sync_shards = {{ reg_sync_shards }}
 
 ## ---------------------------------------------------------------------------
 ## Connection pooling (integration only)
 ## ---------------------------------------------------------------------------
-outgoing_clustering_connection_count = {{ connection_pool_size | default(outgoing_clustering_connection_count) }}
+outgoing_clustering_connection_count = {{ outgoing_clustering_connection_count }}
 
 ## ---------------------------------------------------------------------------
 ## Balance (integration only)
@@ -130,12 +132,15 @@ rebalance_auto_interval = {{ rebalance_auto_interval }}
 ## Cluster health (integration only)
 ## ---------------------------------------------------------------------------
 cluster_ready_quorum = {{ cluster_ready_quorum }}
+cluster_ready_rpc_timeout = {{ cluster_ready_rpc_timeout }}
 dead_node_cleanup_timeout = {{ dead_node_cleanup_timeout }}
 
 ## ---------------------------------------------------------------------------
-## Gossip (integration only - vmq_swc setting)
+## Gossip (integration only - vmq_swc settings)
 ## ---------------------------------------------------------------------------
 vmq_swc.gossip_interval = {{ gossip_interval }}
+vmq_swc.fast_gossip_interval = {{ fast_gossip_interval }}
+vmq_swc.fast_gossip_duration = {{ fast_gossip_duration }}
 {% endif %}
 
 ## ---------------------------------------------------------------------------
@@ -162,9 +167,9 @@ plugins.vmq_passwd = off
 plugins.vmq_acl = off
 {% endif %}
 
-{% if vernemq_version_family != 'integration' %}
+{% if build_mode | default('release') == 'release' %}
 ## ---------------------------------------------------------------------------
-## EULA acceptance (required for stock releases)
+## EULA acceptance (required for prebuilt RPM releases only)
 ## ---------------------------------------------------------------------------
 accept_eula = yes
 {% endif %}

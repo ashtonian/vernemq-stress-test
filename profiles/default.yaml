@@ -69,6 +69,8 @@ tunables:
   # Erlang VM
   erlang_async_threads: 64
   erlang_max_ports: 1048576
+  erlang_max_processes: 1048576
+  erlang_distribution_buffer_size: 32768
 
   # --- 2.x+ only (skipped for 1.x) ----------------------------------------
 
@@ -78,11 +80,13 @@ tunables:
 
   # Clustering reconnect tuning
   outgoing_clustering_reconnect_base_delay: 1000
-  outgoing_clustering_reconnect_max_delay: 30000
+  outgoing_clustering_reconnect_max_delay: 5000
   outgoing_clustering_connection_count: 4
+  outgoing_clustering_buffer_drop_policy: "lifo"
 
-  # Registry trie
+  # Registry
   reg_trie_workers: 8
+  reg_sync_shards: 8
 
   # Balance
   balance_enabled: "off"
@@ -103,7 +107,10 @@ tunables:
 
   # Cluster health
   cluster_ready_quorum: "1.0"
+  cluster_ready_rpc_timeout: 5000
   dead_node_cleanup_timeout: 0
 
-  # Gossip
-  gossip_interval: 10000
+  # Gossip (vmq_swc)
+  gossip_interval: 15000
+  fast_gossip_interval: 2000
+  fast_gossip_duration: 30000

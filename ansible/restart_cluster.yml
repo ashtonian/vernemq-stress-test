@@ -10,6 +10,13 @@
 - name: Restart VerneMQ services
   hosts: vmq_nodes
   become: true
+  vars_files:
+    - roles/vernemq/defaults/main.yml
+  pre_tasks:
+    - name: Set vmq-admin command for source builds
+      ansible.builtin.set_fact:
+        vmq_admin_cmd: "{{ vernemq_install_dir }}/bin/vmq-admin"
+      when: build_mode | default('') in ['source', 'git_clone']
   tasks:
     - name: Stop VerneMQ service
       ansible.builtin.service:

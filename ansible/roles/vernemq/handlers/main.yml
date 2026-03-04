@@ -1,13 +1,22 @@
 ---
 # NOTE: Re-running deploy on a live cluster triggers simultaneous restarts
 # unless the playbook uses serial: 1 to roll through nodes one at a time.
-- name: restart vernemq
+- name: kill stale vernemq
+  ansible.builtin.shell:
+    cmd: |
+      systemctl stop vernemq 2>/dev/null || true
+      pkill -9 beam.smp 2>/dev/null || true
+      sleep 2
+  become: true
+  changed_when: false
+  listen: restart vernemq
+
+- name: start vernemq
   ansible.builtin.service:
     name: vernemq
-    state: restarted
+    state: started
   become: true
-  environment:
-    WAIT_FOR_ERLANG: "60"
+  listen: restart vernemq
 
 - name: reload vernemq
   ansible.builtin.command:

@@ -301,7 +301,11 @@ reset_cluster_state() {
     sleep 30
 
     # 3. Restart cluster via ansible
-    run_ansible "restart_cluster.yml" || log "WARNING: Cluster restart had issues"
+    local -a restart_args=()
+    if [[ -n "${BUILD_MODE:-}" ]]; then
+        restart_args+=(-e "build_mode=${BUILD_MODE}")
+    fi
+    run_ansible "restart_cluster.yml" "${restart_args[@]}" || log "WARNING: Cluster restart had issues"
 
     # 4. Re-apply profile if specified
     if [[ -n "${PROFILE_PATH:-}" ]]; then
@@ -329,6 +333,19 @@ run_scenarios() {
             suite=$(bash "${scenario_dir}/suite.sh" "${CLUSTER_SIZE:-3}" "${VMQ_VERSION:-unknown}")
             IFS=',' read -ra nums <<< "$suite"
             ;;
+        all)
+            # Discover all scenario numbers from filenames
+            local -a nums=()
+            local f
+            for f in "${scenario_dir}"/core/[0-9]*.sh "${scenario_dir}"/integration/[0-9]*.sh; do
+                [[ -f "$f" ]] || continue
+                local n
+                n=$(basename "$f" | grep -oE '^[0-9]+')
+                nums+=("$n")
+            done
+            # Sort and deduplicate
+            IFS=$'\n' read -ra nums <<< "$(printf '%s\n' "${nums[@]}" | sort -n -u)"
+            ;;
         *)
             IFS=',' read -ra nums <<< "${SCENARIOS:-}"
             ;;
@@ -341,7 +358,7 @@ run_scenarios() {
         padded=$(printf "%02d" "$num")
         local script=""
         # Search in subdirectories
-        script=$(ls "${scenario_dir}/core/${padded}_"*.sh "${scenario_dir}/integration/${padded}_"*.sh 2>/dev/null | head -1)
+        script=$(ls "${scenario_dir}/core/${padded}_"*.sh "${scenario_dir}/integration/${padded}_"*.sh 2>/dev/null | head -1 || true)
         if [[ -z "$script" ]]; then
             log "WARNING: No scenario matching ${padded}"
             continue

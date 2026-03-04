@@ -16,6 +16,15 @@
         state: stopped
       ignore_errors: true
 
+    - name: Kill stale VerneMQ/BEAM processes
+      ansible.builtin.shell:
+        cmd: pkill -9 beam.smp || true
+      changed_when: false
+
+    - name: Wait for processes to exit
+      ansible.builtin.pause:
+        seconds: 2
+
     - name: Clean VerneMQ data directory
       ansible.builtin.file:
         path: "{{ vernemq_data_dir }}"
@@ -28,6 +37,7 @@
         owner: vernemq
         group: vernemq
         mode: "0755"
+      ignore_errors: true
 
     - name: Clean VerneMQ log directory
       ansible.builtin.file:
@@ -41,6 +51,7 @@
         owner: vernemq
         group: vernemq
         mode: "0755"
+      ignore_errors: true
 
     - name: Display teardown complete
       ansible.builtin.debug:

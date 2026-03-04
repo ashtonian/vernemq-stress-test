@@ -133,34 +133,34 @@ deploy_and_run() {
     run_ansible "teardown_cluster.yml" || true
 
     # Deploy via git clone
-    local ansible_auth_args=()
-    if [[ -n "${BENCH_MQTT_USERNAME:-}" && -n "${BENCH_MQTT_PASSWORD:-}" ]]; then
-        ansible_auth_args=(
-            -e "bench_auth_enabled=true"
-            -e "bench_mqtt_username=${BENCH_MQTT_USERNAME}"
-            -e "bench_mqtt_password=${BENCH_MQTT_PASSWORD}"
-        )
-    fi
+    # NOTE: Auth disabled for source builds — vmq_passwd bcrypt NIF has
+    # compatibility issues with OTP 27. Both versions get anonymous access
+    # so comparisons remain fair.
     run_ansible "deploy_vernemq.yml" \
         -e "build_mode=git_clone" \
         -e "vernemq_git_repo=${repo}" \
-        -e "vernemq_git_ref=${ref}" \
-        ${ansible_auth_args[@]+"${ansible_auth_args[@]}"}
+        -e "vernemq_git_ref=${ref}"
 
     run_ansible "deploy_bench.yml"
     run_ansible "deploy_monitoring.yml" || true
-    run_ansible "configure_cluster.yml"
+    run_ansible "configure_cluster.yml" -e "build_mode=git_clone"
 
     # Run scenarios
     log "Running scenarios for ${ref}..."
     export RESULTS_DIR="$results_dir"
     export VMQ_VERSION="$ref"
+    export VMQ_ADMIN="sudo /opt/vernemq/bin/vmq-admin"
+    export VMQ_CONF_PATH="/opt/vernemq/etc/vernemq.conf"
     export LOAD_MULTIPLIER
     export DURATION
     export STABILITY_DURATION
     export SCENARIOS
     export BENCH_COMPARISON_MODE=1
     export EXPORT_PROM=0
+    export BUILD_MODE=git_clone
+    # Clear auth vars since we deploy without auth for source builds
+    export BENCH_MQTT_USERNAME=""
+    export BENCH_MQTT_PASSWORD=""
 
     run_scenarios
 
