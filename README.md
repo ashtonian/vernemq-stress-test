@@ -4,6 +4,28 @@ Automated benchmark and chaos-testing framework for [VerneMQ](https://vernemq.co
 
 Supports A/B comparison, N-version matrix benchmarking, and targets any git repos/refs (tags, branches, or commits).
 
+### Scenarios
+
+The suite runs **11 scenarios** across two categories:
+
+- **Core** (any VerneMQ version): baseline throughput, node failure recovery, connection storm, node flapping, graceful shutdown, network partition, slow node, rolling upgrade
+- **Integration** (require unmerged features): cluster rebalance, netsplit recovery, subscription storm
+
+Scenarios are auto-selected based on cluster size and version compatibility. See [scenarios/README.md](scenarios/README.md) for details.
+
+### Tuning Profiles
+
+Each benchmark run can apply a **tuning profile** that overlays VerneMQ configuration on top of the defaults:
+
+| Profile | Description |
+|---------|-------------|
+| `default.yaml` | Stock VerneMQ configuration — base for all overlays |
+| `high_throughput.yaml` | Maximum throughput (higher inflight, more acceptors, larger port limits) |
+| `balanced_cluster.yaml` | Balance and rebalance enabled with auto-interval |
+| `netsplit_tolerant.yaml` | Quorum-based health with dead node cleanup |
+
+Version-specific **scenario profiles** (`scenarios/profiles/`) control which scenarios are compatible with each VerneMQ release (v1.x, v2.0, v2.1, integration, local/Docker).
+
 ## Prerequisites
 
 | Tool | Version | Purpose |

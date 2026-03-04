@@ -5,7 +5,7 @@
 # ---------------------------------------------------------------------------
 # Build stage
 # ---------------------------------------------------------------------------
-FROM erlang:27.2 AS builder
+FROM erlang:26.2 AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git make gcc g++ cmake libsnappy-dev ca-certificates \
