@@ -33,7 +33,7 @@ LB_HOST="${LB_HOST:-}"
 BENCH_USE_LB="${BENCH_USE_LB:-0}"
 BENCH_MQTT_USERNAME="${BENCH_MQTT_USERNAME:-}"
 BENCH_MQTT_PASSWORD="${BENCH_MQTT_PASSWORD:-}"
-SSH_OPTS="${SSH_OPTS:--o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ControlMaster=auto -o ControlPath=/tmp/vmq-bench-%r@%h:%p -o ControlPersist=120${SSH_KEY:+ -i $SSH_KEY}}"
+SSH_OPTS="${SSH_OPTS:--o StrictHostKeyChecking=no -o ConnectTimeout=10 -o ControlMaster=auto -o ControlPath=/tmp/vmq-bench-$$-%r@%h:%p -o ControlPersist=120${SSH_KEY:+ -i $SSH_KEY}}"
 
 # If MONITOR_HOST is set and nodes are on private subnets, add ProxyJump
 # Set SSH_USE_PROXY=0 to disable ProxyJump (e.g. when nodes are directly reachable)
@@ -552,6 +552,160 @@ wait_cluster_ready() {
     return 1
 }
 
+# ---------------------------------------------------------------------------
+# Static config reconfiguration (settings not in vmq-admin set whitelist)
+# ---------------------------------------------------------------------------
+
+VMQ_CONF_PATH="${VMQ_CONF_PATH:-/etc/vernemq/vernemq.conf}"
+
+# Reconfigure a static vernemq.conf setting and restart the cluster.
+# Use this for settings that are read once at supervisor startup and cannot
+# be changed at runtime via vmq-admin set (e.g. reg_trie_workers,
+# outgoing_clustering_connection_count).
+reconfigure_and_restart() {
+    local setting="$1" value="$2"
+    local -a nodes
+    read -ra nodes <<< "$VMQ_NODES"
+    local expected_nodes=${#nodes[@]}
+
+    log_info "Reconfiguring cluster: ${setting}=${value} (static, requires restart)..."
+
+    # Update config on all nodes
+    for i in "${!nodes[@]}"; do
+        ssh_vmq "$i" "
+            if sudo grep -q '^${setting} ' ${VMQ_CONF_PATH} 2>/dev/null; then
+                sudo sed -i 's|^${setting} = .*|${setting} = ${value}|' ${VMQ_CONF_PATH}
+            else
+                echo '${setting} = ${value}' | sudo tee -a ${VMQ_CONF_PATH} >/dev/null
+            fi
+        " || log_error "Failed to update ${setting} on node $i"
+    done
+
+    # Stop all nodes (parallel)
+    for i in "${!nodes[@]}"; do
+        ssh_vmq "$i" "sudo systemctl stop vernemq" &
+    done
+    wait
+    sleep 5
+
+    # Start all nodes
+    for i in "${!nodes[@]}"; do
+        start_vmq_node "$i"
+    done
+
+    # Wait for cluster readiness
+    wait_cluster_synced "reconfigure_${setting}_${value}" 120
+
+    log_info "Cluster reconfigured and synced: ${setting}=${value}"
+}
+
+# ---------------------------------------------------------------------------
+# Standardized cluster readiness check with timing
+# ---------------------------------------------------------------------------
+
+wait_cluster_synced() {
+    local label="${1:-cluster_sync}"
+    local max_wait="${2:-120}"
+    local expected_nodes
+    expected_nodes=$(vmq_node_count)
+
+    local timing_csv="${RESULTS_DIR}/${SCENARIO_TAG}/cluster_sync_timing.csv"
+    mkdir -p "$(dirname "$timing_csv")"
+
+    # Write CSV header if file doesn't exist
+    if [[ ! -f "$timing_csv" ]]; then
+        echo "label,phase,status,duration_s,timestamp" > "$timing_csv"
+    fi
+
+    local sync_start phase_start phase_end duration
+
+    sync_start=$(date +%s)
+    log_info "Cluster sync check ($label): starting ${expected_nodes}-node readiness..."
+
+    # Phase 1 — Node discovery
+    phase_start=$(date +%s)
+    log_info "  Phase 1: Waiting for $expected_nodes nodes to join cluster..."
+    if wait_cluster_ready "$expected_nodes" "$max_wait"; then
+        phase_end=$(date +%s)
+        duration=$(( phase_end - phase_start ))
+        echo "$label,node_discovery,ok,${duration},$(_ts)" >> "$timing_csv"
+        log_info "  Phase 1 complete: node discovery in ${duration}s"
+    else
+        phase_end=$(date +%s)
+        duration=$(( phase_end - phase_start ))
+        echo "$label,node_discovery,fail,${duration},$(_ts)" >> "$timing_csv"
+        log_error "  Phase 1 FAILED: node discovery after ${duration}s"
+        return 1
+    fi
+
+    # Phase 2 — Subscription convergence
+    local remaining=$(( max_wait - (phase_end - sync_start) ))
+    (( remaining < 30 )) && remaining=30
+    phase_start=$(date +%s)
+    log_info "  Phase 2: Waiting for subscription convergence (timeout: ${remaining}s)..."
+    if wait_subscriptions_converged "$remaining" 10; then
+        phase_end=$(date +%s)
+        duration=$(( phase_end - phase_start ))
+        echo "$label,subscription_convergence,ok,${duration},$(_ts)" >> "$timing_csv"
+        log_info "  Phase 2 complete: subscriptions converged in ${duration}s"
+    else
+        phase_end=$(date +%s)
+        duration=$(( phase_end - phase_start ))
+        echo "$label,subscription_convergence,fail,${duration},$(_ts)" >> "$timing_csv"
+        log_error "  Phase 2 FAILED: subscription convergence after ${duration}s"
+        return 1
+    fi
+
+    # Phase 3 — No drops (cluster_bytes_dropped stable over 5s)
+    phase_start=$(date +%s)
+    log_info "  Phase 3: Checking cluster_bytes_dropped stability..."
+    local drops_before drops_after
+    drops_before=$(get_vmq_metric_sum "cluster_bytes_dropped")
+    sleep 5
+    drops_after=$(get_vmq_metric_sum "cluster_bytes_dropped")
+    phase_end=$(date +%s)
+    duration=$(( phase_end - phase_start ))
+    if (( drops_after > drops_before )); then
+        echo "$label,no_drops,fail,${duration},$(_ts)" >> "$timing_csv"
+        log_error "  Phase 3 FAILED: cluster_bytes_dropped increasing ($drops_before -> $drops_after)"
+        return 1
+    fi
+    echo "$label,no_drops,ok,${duration},$(_ts)" >> "$timing_csv"
+    log_info "  Phase 3 complete: drops stable at $drops_after (${duration}s)"
+
+    # Phase 4 — Balance health (integration only)
+    if has_feature "balance"; then
+        phase_start=$(date +%s)
+        log_info "  Phase 4: Checking balance-health endpoint..."
+        local all_healthy=true
+        local -a nodes
+        read -ra nodes <<< "$VMQ_NODES"
+        for i in "${!nodes[@]}"; do
+            local status
+            status=$(check_balance_health "$i")
+            if [[ "$status" != "200" ]]; then
+                all_healthy=false
+                log_error "  Node $i balance-health returned $status"
+            fi
+        done
+        phase_end=$(date +%s)
+        duration=$(( phase_end - phase_start ))
+        if $all_healthy; then
+            echo "$label,balance_health,ok,${duration},$(_ts)" >> "$timing_csv"
+            log_info "  Phase 4 complete: all nodes balance-healthy (${duration}s)"
+        else
+            echo "$label,balance_health,fail,${duration},$(_ts)" >> "$timing_csv"
+            log_error "  Phase 4 FAILED: balance-health check (${duration}s)"
+            return 1
+        fi
+    fi
+
+    local total_duration=$(( $(date +%s) - sync_start ))
+    echo "$label,total,ok,${total_duration},$(_ts)" >> "$timing_csv"
+    log_info "Cluster sync complete ($label): all phases passed in ${total_duration}s"
+    return 0
+}
+
 kill_vmq_node() {
     local node_index="$1"
     log_info "SIGKILL VerneMQ on node $node_index"
@@ -651,7 +805,7 @@ init_scenario() {
     local total_nodes
     total_nodes=$(vmq_node_count)
     if (( total_nodes > 1 )); then
-        assert_cluster_healthy "init_scenario" 120
+        wait_cluster_synced "init_scenario" 120
     fi
 
     # Verify clean state (warn but don't fail — allows running on pre-warmed clusters)

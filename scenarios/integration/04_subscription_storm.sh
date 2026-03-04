@@ -24,8 +24,7 @@ PHASE_DURATION="${PHASE_DURATION:-120}"  # 2 min per phase
 
 set_reg_trie_workers() {
     local workers="$1"
-    log_info "Setting reg_trie_workers=$workers on all nodes"
-    set_vmq_config "reg_trie_workers" "$workers" "all"
+    reconfigure_and_restart "reg_trie_workers" "$workers"
 }
 
 run_sub_storm_phases() {
@@ -41,11 +40,6 @@ run_sub_storm_phases() {
 
     log_info "=== Run with reg_trie_workers=$worker_count ==="
     set_reg_trie_workers "$worker_count"
-    sleep 10
-
-    # Verify cluster healthy before starting this worker-count run
-    assert_cluster_healthy "pre-w${worker_count}" 60 || \
-        log_error "WARNING: cluster not fully healthy before w${worker_count} run"
 
     # Phase 1: Scaled clients subscribe to unique topics simultaneously
     local sub_conns

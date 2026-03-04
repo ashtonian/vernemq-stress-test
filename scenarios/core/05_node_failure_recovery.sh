@@ -27,8 +27,7 @@ ROLLING_GAP=30
 
 set_connection_count() {
     local count="$1"
-    log_info "Setting outgoing_clustering_connection_count=$count on all nodes"
-    set_vmq_config "outgoing_clustering_connection_count" "$count" "all"
+    reconfigure_and_restart "outgoing_clustering_connection_count" "$count"
 }
 
 count_qos1_delivered() {
@@ -61,7 +60,6 @@ run_failure_phases() {
 
     log_info "=== Run with outgoing_clustering_connection_count=$pool_size ==="
     set_connection_count "$pool_size"
-    sleep 10
 
     # Phase 1: Warm-up with scaled load (reference: 10 nodes)
     local total_conns
