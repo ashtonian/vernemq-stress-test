@@ -83,10 +83,13 @@ if [[ "${VMQ_AUTH_ENABLED:-}" == "true" && -n "${VMQ_AUTH_USERNAME:-}" && -n "${
     sed -i 's/^plugins.vmq_acl = off/plugins.vmq_acl = on/' "$VMQ_CONF"
 fi
 
-# Write vm.args overrides for scheduler tuning
-# In Docker: use +sbwt none to avoid busy-waiting on shared CPU
+# Write vm.args — must include -name for distribution, otherwise sys_dist
+# table won't exist and riak_sysmon_filter crashes.
+# In Docker: use +sbwt none to avoid busy-waiting on shared CPU.
 VMQ_ARGS="${VMQ_DIR}/etc/vm.args"
 cat > "$VMQ_ARGS" <<EOF
+-name ${VMQ_NODENAME}
+-setcookie ${VMQ_COOKIE}
 +sbt db
 +sbwt none
 +swt very_low

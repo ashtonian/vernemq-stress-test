@@ -72,7 +72,7 @@ if [[ -n "$CLUSTER_ID" ]]; then
     terraform -chdir="$local_compute_dir" init -input=false
     terraform -chdir="$local_compute_dir" workspace select -or-create "$CLUSTER_ID"
 
-    local var_file_arg=""
+    var_file_arg=""
     if [[ -f "${TF_DIR}/shared.tfvars" ]]; then
         var_file_arg="-var-file=../shared.tfvars"
     fi

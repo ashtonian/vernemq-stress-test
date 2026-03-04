@@ -16,7 +16,7 @@ vmq_nodes
 bench_nodes
 
 [private:vars]
-ansible_ssh_common_args=-o StrictHostKeyChecking=no -o ProxyJump=ec2-user@${monitor_ip}
+ansible_ssh_common_args=-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ProxyCommand="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -W %h:%p ec2-user@${monitor_ip}"
 
 [monitor:vars]
 ansible_ssh_common_args=-o StrictHostKeyChecking=no

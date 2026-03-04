@@ -189,6 +189,8 @@ run_on_cluster() {
         # Subshell to isolate env vars
         setup_env_from_inventory "$inventory"
         export ANSIBLE_INVENTORY="$inventory"
+        # Wait for freshly provisioned instances to become SSH-ready
+        wait_for_ssh 180
         deploy_and_run "$repo" "$ref" "$tag"
     )
 }
@@ -263,28 +265,13 @@ run_parallel() {
         cluster_ids+=("cluster-$((i+1))")
     done
 
-    # Provision clusters if requested
+    # Provision clusters if requested (sequential to avoid terraform state lock conflicts)
     if $PROVISION; then
-        log "Provisioning ${#cluster_ids[@]} clusters..."
-        local -a provision_pids=()
+        log "Provisioning ${#cluster_ids[@]} clusters (sequential)..."
         for cid in "${cluster_ids[@]}"; do
             log "Provisioning cluster: ${cid}"
-            bash "${SCRIPT_DIR}/infra_up.sh" --cluster-id "$cid" --auto-approve &
-            provision_pids+=($!)
+            bash "${SCRIPT_DIR}/infra_up.sh" --cluster-id "$cid" --auto-approve
         done
-
-        # Wait for all provisioning to complete
-        local provision_failed=false
-        for pid in "${provision_pids[@]}"; do
-            if ! wait "$pid"; then
-                log "ERROR: Cluster provisioning failed (PID: $pid)"
-                provision_failed=true
-            fi
-        done
-        if $provision_failed; then
-            log "ERROR: One or more clusters failed to provision"
-            exit 1
-        fi
         log "All clusters provisioned."
     fi
 
@@ -330,17 +317,12 @@ run_parallel() {
     # Generate N-way report
     generate_nway_report "${run_dirs[@]}"
 
-    # Teardown clusters if requested
+    # Teardown clusters if requested (sequential to avoid terraform state lock conflicts)
     if $TEARDOWN; then
-        log "Tearing down ${#cluster_ids[@]} clusters..."
-        local -a teardown_pids=()
+        log "Tearing down ${#cluster_ids[@]} clusters (sequential)..."
         for cid in "${cluster_ids[@]}"; do
             log "Destroying cluster: ${cid}"
-            bash "${SCRIPT_DIR}/infra_down.sh" --cluster-id "$cid" --auto-approve &
-            teardown_pids+=($!)
-        done
-        for pid in "${teardown_pids[@]}"; do
-            wait "$pid" || log "WARNING: Cluster teardown failed (PID: $pid)"
+            bash "${SCRIPT_DIR}/infra_down.sh" --cluster-id "$cid" --auto-approve
         done
         log "All clusters destroyed."
     fi

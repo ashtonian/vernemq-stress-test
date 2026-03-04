@@ -268,7 +268,8 @@ run_variant() {
     while (( elapsed < max_wait )); do
         local running
         running=$(docker exec vmq1 /opt/vernemq/bin/vmq-admin cluster show 2>/dev/null \
-            | grep -c "true" || echo 0)
+            | grep -c "true" 2>/dev/null || echo 0)
+        running=${running//[^0-9]/}
         if (( running >= NUM_NODES )); then
             log "Cluster ready: ${running}/${NUM_NODES} nodes"
             break

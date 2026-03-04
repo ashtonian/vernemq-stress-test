@@ -1,15 +1,16 @@
-# Multi-stage VerneMQ build + runtime
+# Multi-stage VerneMQ build + runtime (Alpine — native ARM64, fast on macOS)
 # Build: docker build -t vmq-local-bench -f bench/local/Dockerfile .
 # (run from project root)
 
 # ---------------------------------------------------------------------------
 # Build stage
 # ---------------------------------------------------------------------------
-FROM erlang:26.2 AS builder
+# Alpine 3.19 = OTP 26; Alpine 3.20+ = OTP 27 (breaks riak_sysmon_filter)
+FROM alpine:3.19 AS builder
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git make gcc g++ cmake libsnappy-dev ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk --no-cache --update --available upgrade && \
+    apk add git alpine-sdk erlang-dev snappy-dev bsd-compat-headers \
+            openssl-dev tzdata procps
 
 COPY . /build
 WORKDIR /build
@@ -17,12 +18,8 @@ WORKDIR /build
 # Clean stale _build from host (may be compiled with different OTP version)
 RUN rm -rf _build
 
-# Generate vars.generated (mirrors Makefile `make rel` target)
-RUN cat vars.config > vars.generated \
-    && echo '{app_version, "docker-local"}.' >> vars.generated
-
-# rebar3 release — exit code 1 is a known rebar3 bug even on success
-RUN ./rebar3 release || true
+# Build release (rebar3 may exit 1 even on success — known bug)
+RUN make rel || true
 
 # Verify the release binary actually exists
 RUN test -f _build/default/rel/vernemq/bin/vernemq \
@@ -31,11 +28,11 @@ RUN test -f _build/default/rel/vernemq/bin/vernemq \
 # ---------------------------------------------------------------------------
 # Runtime stage
 # ---------------------------------------------------------------------------
-FROM debian:bookworm-slim
+FROM alpine:3.19
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libsnappy1v5 openssl libncurses6 procps curl \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk --no-cache --update --available upgrade && \
+    apk add --no-cache ncurses-libs openssl libstdc++ jq curl bash \
+            snappy-dev ca-certificates erlang-dev procps
 
 COPY --from=builder /build/_build/default/rel/vernemq /opt/vernemq
 COPY bench/local/entrypoint.sh /opt/vernemq/entrypoint.sh
@@ -47,7 +44,6 @@ RUN mkdir -p /opt/vernemq/data /opt/vernemq/log
 # MQTT, cluster, HTTP API
 EXPOSE 1883 44053 8888
 
-# VerneMQ takes >15s to start on fresh nodes
 ENV WAIT_FOR_ERLANG=60
 
 ENTRYPOINT ["/opt/vernemq/entrypoint.sh"]

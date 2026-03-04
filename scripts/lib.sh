@@ -102,6 +102,66 @@ preflight_check() {
 }
 
 # ---------------------------------------------------------------------------
+# Wait for SSH readiness on all nodes (for freshly provisioned instances)
+# ---------------------------------------------------------------------------
+
+wait_for_ssh() {
+    local max_wait="${1:-180}"
+    local ssh_key_arg=""
+    if [[ -n "${SSH_KEY:-}" ]]; then
+        ssh_key_arg="-i ${SSH_KEY}"
+    fi
+
+    local all_ips=""
+    for var in VMQ_NODES BENCH_NODES; do
+        if [[ -n "${!var:-}" ]]; then
+            all_ips="${all_ips:+$all_ips }${!var}"
+        fi
+    done
+
+    if [[ -z "$all_ips" ]]; then
+        log "WARNING: No nodes to wait for SSH"
+        return 0
+    fi
+
+    log "Waiting for SSH readiness on all nodes (timeout: ${max_wait}s)..."
+    local start_time
+    start_time=$(date +%s)
+
+    local -a ips
+    read -ra ips <<< "$all_ips"
+
+    # Build SSH base args — use ProxyCommand instead of -J so options
+    # propagate to the jump connection
+    local -a ssh_base=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes)
+    if [[ -n "$ssh_key_arg" ]]; then
+        ssh_base+=($ssh_key_arg)
+    fi
+
+    if [[ -n "${MONITOR_HOST:-}" ]]; then
+        ssh_base+=(-o "ProxyCommand=ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${ssh_key_arg} -W %h:%p ${SSH_USER:-ec2-user}@${MONITOR_HOST}")
+    fi
+
+    for ip in "${ips[@]}"; do
+        while true; do
+            local elapsed=$(( $(date +%s) - start_time ))
+            if (( elapsed >= max_wait )); then
+                log "ERROR: SSH timeout waiting for ${ip} after ${max_wait}s"
+                return 1
+            fi
+            if ssh "${ssh_base[@]}" "${SSH_USER:-ec2-user}@${ip}" echo ok >/dev/null 2>&1; then
+                log "  SSH ready: ${ip} (${elapsed}s)"
+                break
+            fi
+            sleep 5
+        done
+    done
+
+    local total=$(( $(date +%s) - start_time ))
+    log "All nodes SSH-ready in ${total}s"
+}
+
+# ---------------------------------------------------------------------------
 # Parse inventory for node IPs and set environment
 # ---------------------------------------------------------------------------
 
