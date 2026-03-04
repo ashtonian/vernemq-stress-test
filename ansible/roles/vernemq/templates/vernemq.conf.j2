@@ -160,12 +160,14 @@ log.crash.file = {{ vernemq_log_dir }}/crash.log
 {% if bench_auth_enabled and bench_mqtt_password | length > 0 %}
 allow_anonymous = off
 plugins.vmq_passwd = on
-plugins.vmq_acl = on
 {% else %}
 allow_anonymous = on
 plugins.vmq_passwd = off
-plugins.vmq_acl = off
 {% endif %}
+## ACL plugin must always be on — it handles auth_on_subscribe and
+## auth_on_publish hooks.  Without it VerneMQ returns no_matching_hook_found
+## and rejects all subscribe/publish operations even with allow_anonymous = on.
+plugins.vmq_acl = on
 
 {% if build_mode | default('release') == 'release' %}
 ## ---------------------------------------------------------------------------

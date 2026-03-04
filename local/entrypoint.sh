@@ -30,7 +30,9 @@ VMQ_MQTT_LISTENER_MAX_CONNECTIONS="${VMQ_MQTT_LISTENER_MAX_CONNECTIONS:-500000}"
 VMQ_MQTT_LISTENER_NR_OF_ACCEPTORS="${VMQ_MQTT_LISTENER_NR_OF_ACCEPTORS:-200}"
 VMQ_LISTENER_MAX_CONNECTIONS="${VMQ_LISTENER_MAX_CONNECTIONS:-50000}"
 VMQ_LISTENER_NR_OF_ACCEPTORS="${VMQ_LISTENER_NR_OF_ACCEPTORS:-200}"
-VMQ_TCP_LISTEN_OPTIONS="${VMQ_TCP_LISTEN_OPTIONS:-[{nodelay, true}, {linger, {true, 8}}, {send_timeout, 5000}, {send_timeout_close, true}, {backlog, 3072}, {exit_on_close, true}, {keepalive, true}]}"
+if [[ -z "${VMQ_TCP_LISTEN_OPTIONS:-}" ]]; then
+    VMQ_TCP_LISTEN_OPTIONS='[{nodelay, true}, {linger, {true, 8}}, {send_timeout, 5000}, {send_timeout_close, true}, {backlog, 3072}, {exit_on_close, true}, {keepalive, true}]'
+fi
 VMQ_LISTENER_TCP_ALLOWED_PROTOCOL_VERSIONS="${VMQ_LISTENER_TCP_ALLOWED_PROTOCOL_VERSIONS:-3,4,5}"
 VMQ_LISTENER_TCP_PROXY_PROTOCOL="${VMQ_LISTENER_TCP_PROXY_PROTOCOL:-off}"
 VMQ_LISTENER_WS_ALLOWED_PROTOCOL_VERSIONS="${VMQ_LISTENER_WS_ALLOWED_PROTOCOL_VERSIONS:-3,4,5}"
@@ -70,7 +72,6 @@ VMQ_OUTGOING_CLUSTERING_BUFFER_SIZE="${VMQ_OUTGOING_CLUSTERING_BUFFER_SIZE:-1000
 # Docker-specific vm.args overrides
 VMQ_SBWT="${VMQ_SBWT:-none}"
 VMQ_SWT="${VMQ_SWT:-very_low}"
-VMQ_FULLSWEEP_AFTER="${VMQ_FULLSWEEP_AFTER:-0}"
 
 # ---------------------------------------------------------------------------
 # 1. Write vernemq.conf — base config (all versions)
@@ -231,7 +232,6 @@ cat > "$VMQ_ARGS" <<EOF
 +sbwtdcpu none
 +sbwtdio none
 +zdbbl ${VMQ_ERLANG_DISTRIBUTION_BUFFER_SIZE}
-+e ${VMQ_FULLSWEEP_AFTER}
 EOF
 
 echo "==> Config written to ${VMQ_CONF}"

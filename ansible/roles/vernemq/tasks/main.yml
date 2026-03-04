@@ -474,7 +474,7 @@
   when: bench_auth_enabled and bench_mqtt_password | length > 0
   notify: restart vernemq
 
-- name: Deploy vmq.acl file
+- name: Deploy vmq.acl file (authenticated)
   ansible.builtin.copy:
     dest: "{{ vernemq_actual_conf_dir | trim }}/vmq.acl"
     content: |
@@ -485,6 +485,18 @@
     mode: "0644"
   become: true
   when: bench_auth_enabled and bench_mqtt_password | length > 0
+  notify: restart vernemq
+
+- name: Deploy vmq.acl file (anonymous — allow all)
+  ansible.builtin.copy:
+    dest: "{{ vernemq_actual_conf_dir | trim }}/vmq.acl"
+    content: |
+      topic #
+    owner: vernemq
+    group: vernemq
+    mode: "0644"
+  become: true
+  when: not (bench_auth_enabled and bench_mqtt_password | length > 0)
   notify: restart vernemq
 
 # --------------------------------------------------------------------------

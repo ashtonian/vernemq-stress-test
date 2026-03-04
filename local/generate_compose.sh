@@ -210,8 +210,8 @@ fi
 cat >> "$OUTPUT" <<EOF
     ulimits:
       nofile:
-        soft: 262144
-        hard: 262144
+        soft: 1048576
+        hard: 1048576
     sysctls:
       net.core.somaxconn: 65535
       net.ipv4.tcp_max_syn_backlog: 65535
@@ -267,8 +267,8 @@ EOF
     cat >> "$OUTPUT" <<EOF
     ulimits:
       nofile:
-        soft: 262144
-        hard: 262144
+        soft: 1048576
+        hard: 1048576
     sysctls:
       net.core.somaxconn: 65535
       net.ipv4.tcp_max_syn_backlog: 65535
@@ -313,8 +313,8 @@ cat >> "$OUTPUT" <<EOF
     container_name: bench
     ulimits:
       nofile:
-        soft: 262144
-        hard: 262144
+        soft: 1048576
+        hard: 1048576
     sysctls:
       net.core.somaxconn: 65535
       net.ipv4.tcp_max_syn_backlog: 65535

@@ -208,7 +208,7 @@ start_emqtt_bench() {
         auth_args="-u $BENCH_MQTT_USERNAME -P $BENCH_MQTT_PASSWORD"
     fi
 
-    log_info "Starting emqtt_bench on bench node $bench_node ($node): $args${auth_args:+ [auth]}"
+    log_info "Starting emqtt_bench on bench node $bench_node ($node): $args${auth_args:+ [auth]}" >&2
     # shellcheck disable=SC2086
     ssh ${SSH_OPTS} "${SSH_USER}@${node}" \
         "nohup emqtt_bench $args $auth_args > /tmp/emqtt_bench_\$\$.log 2>&1 & echo \$!"

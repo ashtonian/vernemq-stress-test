@@ -117,7 +117,7 @@ measure_baseline_health() {
     t2=$(snapshot_throughput "${tag}_t2")
     local rate=$(( (t2 - t1) / window ))
     echo "${tag},${rate},${t1},${t2}" >> "${RESULTS_DIR}/${SCENARIO_TAG}/baseline_health.csv"
-    log_info "Baseline health [${tag}]: ~${rate} msg/s"
+    log_info "Baseline health [${tag}]: ~${rate} msg/s" >&2
     echo "$rate"
 }
 
